@@ -95,28 +95,11 @@ The app requests the following permissions at runtime:
 - `READ_EXTERNAL_STORAGE` / `READ_MEDIA_AUDIO` – To access local audio files
 - `POST_NOTIFICATIONS` (Android 13+) – For playback notifications
 
-## 🔧 Configuration
-
-### Customizing the Theme
-
-Edit colors in `presentation/ui/theme/Theme.kt`:
-
-```kotlin
-private val DarkColorScheme = darkColorScheme(
-    primary = Color(0xFFFFB74D),
-    background = Color(0xFF0D0D0D),
-    surface = Color(0xFF1A1A1A),
-    // ...
-)
-```
 
 ### Image Loading
 
 Coil is configured with memory and disk caching. The `ImageLoader` is provided via `CompositionLocalProvider` in `MainActivity` for optimal performance.
 
-## 📄 License
-
-This project is licensed under the MIT License – see the [LICENSE](LICENSE) file for details.
 
 ## 🤝 Contributing
 
