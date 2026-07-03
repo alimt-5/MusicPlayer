@@ -107,7 +107,7 @@ Contributions, issues, and feature requests are welcome! Feel free to check the 
 
 ## 📬 Contact
 
-**Developer**: alimt-5
+**Developer**: [alimt-5](https://github.com/alimt-5)
 
 ---
 
