@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <drawable name="media3_notification_small_icon">@drawable/small_icon_notification</drawable>
+    <style name="Theme.MusicPlayer" parent="android:Theme.Material.Light.NoActionBar" />
+
+</resources>

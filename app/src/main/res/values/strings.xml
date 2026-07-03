@@ -1,0 +1,6 @@
+<resources>
+    <string name="app_name">MusicPlayer</string>
+    <string name="searchField">Search</string>
+    <string name="ALPHABETICAL">ALPHABETICAL</string>
+    <string name="error">No Sound Found!</string>
+</resources>
