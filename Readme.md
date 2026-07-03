@@ -33,7 +33,6 @@ The project follows **Clean Architecture** with three layers:
 - **Architecture**: Clean Architecture + MVVM
 - **Navigation**: Jetpack Navigation Compose
 - **Background Playback**: MediaSessionService with foreground notification
-- **Image Caching**: Coil with custom ImageLoader
 - **Min SDK**: Android 8 (API 26)
 
 ## 📁 Project Structure
@@ -95,15 +94,10 @@ The app requests the following permissions at runtime:
 - `READ_EXTERNAL_STORAGE` / `READ_MEDIA_AUDIO` – To access local audio files
 - `POST_NOTIFICATIONS` (Android 13+) – For playback notifications
 
-
-### Image Loading
-
-Coil is configured with memory and disk caching. The `ImageLoader` is provided via `CompositionLocalProvider` in `MainActivity` for optimal performance.
-
-
 ## 🤝 Contributing
 
-Contributions, issues, and feature requests are welcome! Feel free to check the [issues page](https://github.com/alimt-5/MusicPlayer/issues).
+Contributions, issues, and feature requests are welcome!  
+Feel free to check the [issues page](https://github.com/alimt-5/MusicPlayer/issues).
 
 ## 📬 Contact
 
