@@ -11,8 +11,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Card
@@ -30,10 +30,11 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.example.musicplayer.R
+import com.example.musicplayer.domain.AudioTrack
 
 @Composable
 fun NowPlayingBottomBar(
-    currentTrack: com.example.musicplayer.domain.AudioTrack,
+    currentTrack: AudioTrack? = null,
     isPlaying: Boolean,
     onTogglePlayPause: () -> Unit,
     onPrevious: () -> Unit,
@@ -54,7 +55,7 @@ fun NowPlayingBottomBar(
             verticalAlignment = Alignment.CenterVertically
         ) {
             AsyncImage(
-                model = currentTrack.albumArtUri,
+                model = currentTrack?.albumArtUri?:"Album Art",
                 contentDescription = "Album Art",
                 modifier = Modifier
                     .size(45.dp)
@@ -66,19 +67,19 @@ fun NowPlayingBottomBar(
             Spacer(modifier = Modifier.width(8.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = currentTrack.title,
+                    text = currentTrack?.title ?: "Title",
                     style = MaterialTheme.typography.bodyLarge,
                     maxLines = 1
                 )
                 Text(
-                    text = currentTrack.artist,
+                    text = currentTrack?.artist ?: "Artist",
                     style = MaterialTheme.typography.bodySmall,
                     maxLines = 1
                 )
             }
             Row(horizontalArrangement = Arrangement.End) {
                 IconButton(onClick = onPrevious) {
-                    Icon(Icons.Default.ArrowBack, contentDescription = "previous")
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "previous")
                 }
                 IconButton(onClick = onTogglePlayPause) {
                     Icon(
@@ -87,7 +88,7 @@ fun NowPlayingBottomBar(
                     )
                 }
                 IconButton(onClick = onNext) {
-                    Icon(Icons.Default.ArrowForward, contentDescription = "next")
+                    Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "next")
                 }
             }
         }

@@ -1,5 +1,7 @@
 package com.example.musicplayer.presentation.AudioListScreen
 
+import android.os.Build
+import androidx.annotation.RequiresApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -13,6 +15,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import com.example.musicplayer.presentation.viewModel.AudioViewModel
 
+@RequiresApi(Build.VERSION_CODES.R)
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AudioListScreen(
@@ -39,15 +42,14 @@ fun AudioListScreen(
                 .fillMaxWidth()
         )
 
-        if (state.currentTrack != null) {
-            NowPlayingBottomBar(
-                currentTrack = state.currentTrack!!,
-                isPlaying = state.isPlaying,
-                onTogglePlayPause = { viewModel.togglePlayPause() },
-                onPrevious = { viewModel.previousTrack() },
-                onNext = { viewModel.nextTrack() },
-                onNavigateToPlayer = onNavigateToPlayer
-            )
-        }
+        NowPlayingBottomBar(
+            currentTrack = if (state.currentTrack != null) state.currentTrack!! else null,
+            isPlaying = state.isPlaying,
+            onTogglePlayPause = { viewModel.togglePlayPause() },
+            onPrevious = { viewModel.previousTrack() },
+            onNext = { viewModel.nextTrack() },
+            onNavigateToPlayer = onNavigateToPlayer
+        )
+
     }
 }

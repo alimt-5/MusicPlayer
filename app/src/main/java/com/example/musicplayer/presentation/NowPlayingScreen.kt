@@ -1,5 +1,6 @@
 package com.example.musicplayer.presentation
 
+import android.annotation.SuppressLint
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -16,8 +17,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Repeat
@@ -71,15 +72,16 @@ fun NowPlayingScreen(viewModel: AudioViewModel, onBack: () -> Unit) {
     val currentTrack = state.currentTrack
     val durationMs = currentTrack?.duration ?: 0L
 
+    @SuppressLint("DefaultLocale")
     fun formatTime(ms: Long): String {
         if (ms <= 0) return "00:00"
         val hours = TimeUnit.MILLISECONDS.toHours(ms)
         val minutes = TimeUnit.MILLISECONDS.toMinutes(ms) % 60
         val seconds = TimeUnit.MILLISECONDS.toSeconds(ms) % 60
         return if (hours > 0) {
-            String.format("%02d:%02d:%02d", hours, minutes, seconds)
+            "${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}"
         } else {
-            String.format("%02d:%02d", minutes, seconds)
+            "${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}"
         }
     }
 
@@ -181,7 +183,11 @@ fun NowPlayingScreen(viewModel: AudioViewModel, onBack: () -> Unit) {
             }
 
             IconButton(onClick = { viewModel.previousTrack() }) {
-                Icon(Icons.Default.ArrowBack, contentDescription = "previous", tint = MaterialTheme.colorScheme.onSurface)
+                Icon(
+                    Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "previous",
+                    tint = MaterialTheme.colorScheme.onSurface
+                )
             }
             IconButton(onClick = { viewModel.togglePlayPause() }) {
                 Icon(
@@ -191,7 +197,11 @@ fun NowPlayingScreen(viewModel: AudioViewModel, onBack: () -> Unit) {
                 )
             }
             IconButton(onClick = { viewModel.nextTrack() }) {
-                Icon(Icons.Default.ArrowForward, contentDescription = "next", tint = MaterialTheme.colorScheme.onSurface)
+                Icon(
+                    Icons.AutoMirrored.Filled.ArrowForward,
+                    contentDescription = "next",
+                    tint = MaterialTheme.colorScheme.onSurface
+                )
             }
         }
     }

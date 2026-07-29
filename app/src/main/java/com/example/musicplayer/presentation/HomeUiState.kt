@@ -3,16 +3,9 @@ package com.example.musicplayer.presentation
 import com.example.musicplayer.domain.AudioTrack
 
 
-enum class SortType {
-    ALPHABETICAL,
-    DATE_ADDED
-}
 
-enum class RepeatMode {
-    OFF,
-    REPEAT_ONE,
-    REPEAT_ALL
-}
+
+
 
 
 data class HomeUiState(
