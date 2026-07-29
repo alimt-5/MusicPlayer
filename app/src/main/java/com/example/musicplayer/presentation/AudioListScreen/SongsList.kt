@@ -1,8 +1,8 @@
 package com.example.musicplayer.presentation.AudioListScreen
 
 import android.os.Build
-import android.util.Log
 import androidx.annotation.RequiresApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,12 +20,15 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -42,6 +45,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.example.musicplayer.R
@@ -97,9 +101,11 @@ fun SongsList(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
+
                             val imageModel = remember(track.id) { track.albumArtUri }
+
                             AsyncImage(
                                 model = imageModel,
                                 contentDescription = "Album Art",
@@ -113,37 +119,77 @@ fun SongsList(
 
                             Spacer(modifier = Modifier.width(12.dp))
 
-                            Column {
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = track.title,
-                                    style = MaterialTheme.typography.titleMedium
+                                    style = MaterialTheme.typography.titleMedium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
                                     text = track.artist,
-                                    style = MaterialTheme.typography.bodyMedium
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
 
-                            IconButton(onClick = {
-                                try {
-                                    trackToDelete = track
-                                    showDeleteDialog = true
-                                } catch (e: Exception) {
-                                    Log.e("SongsList", "Error in delete button click", e)
+                            var expanded by remember { mutableStateOf(false) }
+
+                            Box {
+                                IconButton(onClick = { expanded = true }) {
+                                    Icon(
+                                        Icons.Default.MoreVert,
+                                        contentDescription = "MoreVert"
+                                    )
                                 }
-                            }) {
-                                Icon(Icons.Default.Delete, contentDescription = "Delete Song")
+
+                                DropdownMenu(
+                                    expanded = expanded,
+                                    onDismissRequest = { expanded = false },
+                                    modifier = Modifier.background(MaterialTheme.colorScheme.surface)
+                                ) {
+                                    DropdownMenuItem(
+                                        text = {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Icon(
+                                                    Icons.Default.Share,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(20.dp),
+                                                    tint = MaterialTheme.colorScheme.primary
+                                                )
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Text("Sharing")
+                                            }
+                                        },
+                                        onClick = {
+                                            viewModel.shareTrack(track)
+                                            expanded = false
+                                        }
+                                    )
+
+                                    DropdownMenuItem(
+                                        text = {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Icon(
+                                                    Icons.Default.Delete,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(20.dp),
+                                                    tint = MaterialTheme.colorScheme.error
+                                                )
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Text("Delete", color = MaterialTheme.colorScheme.error)
+                                            }
+                                        },
+                                        onClick = {
+                                            trackToDelete = track
+                                            showDeleteDialog = true
+                                            expanded = false
+                                        }
+                                    )
+                                }
                             }
 
-                            IconButton(onClick = {
-                                viewModel.shareTrack(track)
-                            }) {
-                                Icon(
-                                    Icons.Default.Share,
-                                    contentDescription = "Share Song",
-                                    tint = MaterialTheme.colorScheme.primary
-                                )
-                            }
 
                         }
                     }
@@ -159,7 +205,7 @@ fun SongsList(
                     trackToDelete = null
                 },
                 title = { Text("Delete Song") },
-                text = { Text("Are you sure you want to delete ${trackToDelete?.title} ?") },
+                text = { Text("Are you sure you want to delete\n${trackToDelete?.title} -> ${trackToDelete?.artist} ?") },
                 confirmButton = {
                     Button(
                         onClick = {

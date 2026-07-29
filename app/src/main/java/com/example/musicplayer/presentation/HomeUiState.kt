@@ -2,12 +2,6 @@ package com.example.musicplayer.presentation
 
 import com.example.musicplayer.domain.AudioTrack
 
-
-
-
-
-
-
 data class HomeUiState(
     val tracks: List<AudioTrack> = emptyList(),
     val searchQuery: String = "",
