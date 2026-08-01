@@ -267,7 +267,7 @@ class AudioViewModel(
                         .setArtist(
                             audioTrack.artist.ifBlank { "Unknown artist" }
                         )
-                        .setAlbumTitle(audioTrack.albumArtUri)
+                        .setAlbumTitle(audioTrack.mediaUri)
                         .build()
                 )
                 .build()
