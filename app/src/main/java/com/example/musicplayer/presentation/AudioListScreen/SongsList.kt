@@ -2,8 +2,9 @@ package com.example.musicplayer.presentation.AudioListScreen
 
 import android.os.Build
 import androidx.annotation.RequiresApi
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -19,8 +20,10 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -55,6 +58,7 @@ import com.example.musicplayer.domain.AudioTrack
 import com.example.musicplayer.presentation.HomeUiState
 import com.example.musicplayer.presentation.viewModel.AudioViewModel
 
+@OptIn(ExperimentalFoundationApi::class)
 @RequiresApi(Build.VERSION_CODES.R)
 @ExperimentalMaterial3Api
 @Composable
@@ -86,14 +90,29 @@ fun SongsList(
                 contentPadding = PaddingValues(bottom = bottomPadding)
             ) {
                 items(items = state.tracks, key = { it.id }) { track ->
+                    val isSelected = state.selectedIds.contains(track.id)
+                    val isSelectionMode = state.isSelectionMode
+
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp, vertical = 4.dp)
-                            .clickable {
-                                viewModel.onTrackClick(track)
-                                onNavigateToPlayer()
-                            }, elevation = CardDefaults.cardElevation(0.dp)
+                            .combinedClickable(
+                                onClick = {
+                                    if (isSelectionMode) {
+                                        viewModel.toggleSelection(track.id)
+                                    } else {
+                                        viewModel.onTrackClick(track)
+                                        onNavigateToPlayer()
+                                    }
+                                },
+                                onLongClick = {
+                                    if (!isSelectionMode) {
+                                        viewModel.enterSelectionMode(track.id)
+                                    }
+                                }
+                            ),
+                        elevation = CardDefaults.cardElevation(0.dp)
                     ) {
                         Row(
                             modifier = Modifier
@@ -101,25 +120,23 @@ fun SongsList(
                                 .padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-
-//                            val imageModel = remember(track.id) { track.albumArtUri }
-//
-//                            AsyncImage(
-//                                model = imageModel,
-//                                contentDescription = "Album Art",
-//                                modifier = Modifier
-//                                    .size(50.dp)
-//                                    .clip(RoundedCornerShape(8.dp)),
-//                                error = painterResource(R.drawable.app_icon),
-//                                placeholder = painterResource(R.drawable.app_icon),
-//                                contentScale = ContentScale.Crop
-//                            )
+                            if (isSelectionMode) {
+                                Icon(
+                                    imageVector = if (isSelected) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                                    contentDescription = if (isSelected) "Selected" else "Unselected",
+                                    tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(
+                                        alpha = 0.4f
+                                    ),
+                                    modifier = Modifier.size(24.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                            }
                             AsyncImage(
                                 model = ImageRequest.Builder(LocalContext.current)
                                     .data(track.albumArtUri)
                                     .crossfade(false)
-                                    .memoryCacheKey(track.id.toString())
-                                    .diskCacheKey(track.id.toString())
+                                    .memoryCacheKey(track.id)
+                                    .diskCacheKey(track.id)
                                     .build(),
                                 contentDescription = "Album Art",
                                 modifier = Modifier
@@ -144,71 +161,77 @@ fun SongsList(
                                     overflow = TextOverflow.Ellipsis
                                 )
                             }
+                            if (!isSelectionMode) {
+                                var expanded by remember { mutableStateOf(false) }
+                                Box {
+                                    IconButton(onClick = { expanded = true }) {
+                                        Icon(
+                                            Icons.Default.MoreVert,
+                                            contentDescription = "MoreVert"
+                                        )
+                                    }
 
-                            var expanded by remember { mutableStateOf(false) }
-                            Box {
-                                IconButton(onClick = { expanded = true }) {
-                                    Icon(
-                                        Icons.Default.MoreVert, contentDescription = "MoreVert"
-                                    )
-                                }
+                                    DropdownMenu(
+                                        expanded = expanded,
+                                        onDismissRequest = { expanded = false },
+                                        modifier = Modifier.background(MaterialTheme.colorScheme.surface)
+                                    ) {
+                                        DropdownMenuItem(
+                                            text = {
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    Icon(
+                                                        Icons.Default.Share,
+                                                        contentDescription = null,
+                                                        modifier = Modifier.size(20.dp),
+                                                        tint = MaterialTheme.colorScheme.primary
+                                                    )
+                                                    Spacer(modifier = Modifier.width(8.dp))
+                                                    Text("Sharing")
+                                                }
+                                            },
+                                            onClick = {
+                                                viewModel.shareTrack(track)
+                                                expanded = false
+                                            }
+                                        )
 
-                                DropdownMenu(
-                                    expanded = expanded,
-                                    onDismissRequest = { expanded = false },
-                                    modifier = Modifier.background(MaterialTheme.colorScheme.surface)
-                                ) {
-                                    DropdownMenuItem(text = {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Icon(
-                                                Icons.Default.Share,
-                                                contentDescription = null,
-                                                modifier = Modifier.size(20.dp),
-                                                tint = MaterialTheme.colorScheme.primary
-                                            )
-                                            Spacer(modifier = Modifier.width(8.dp))
-                                            Text("Sharing")
-                                        }
-                                    }, onClick = {
-                                        viewModel.shareTrack(track)
-                                        expanded = false
-                                    })
-
-                                    DropdownMenuItem(text = {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Icon(
-                                                Icons.Default.Delete,
-                                                contentDescription = null,
-                                                modifier = Modifier.size(20.dp),
-                                                tint = MaterialTheme.colorScheme.error
-                                            )
-                                            Spacer(modifier = Modifier.width(8.dp))
-                                            Text(
-                                                "Delete",
-                                                color = MaterialTheme.colorScheme.error
-                                            )
-                                        }
-                                    }, onClick = {
-                                        trackToDelete = track
-                                        showDeleteDialog = true
-                                        expanded = false
-                                    })
+                                        DropdownMenuItem(
+                                            text = {
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    Icon(
+                                                        Icons.Default.Delete,
+                                                        contentDescription = null,
+                                                        modifier = Modifier.size(20.dp),
+                                                        tint = MaterialTheme.colorScheme.error
+                                                    )
+                                                    Spacer(modifier = Modifier.width(8.dp))
+                                                    Text(
+                                                        "Delete",
+                                                        color = MaterialTheme.colorScheme.error
+                                                    )
+                                                }
+                                            },
+                                            onClick = {
+                                                trackToDelete = track
+                                                showDeleteDialog = true
+                                                expanded = false
+                                            }
+                                        )
+                                    }
                                 }
                             }
-
-
                         }
                     }
                 }
             }
         }
 
-
         if (showDeleteDialog && trackToDelete != null) {
-            AlertDialog(onDismissRequest = {
-                showDeleteDialog = false
-                trackToDelete = null
-            },
+            AlertDialog(
+                onDismissRequest = {
+                    showDeleteDialog = false
+                    trackToDelete = null
+                },
                 title = { Text("Delete Song") },
                 text = { Text("Are you sure you want to delete\n${trackToDelete?.title} -> ${trackToDelete?.artist} ?") },
                 confirmButton = {
@@ -230,7 +253,8 @@ fun SongsList(
                     }) {
                         Text("Cancel")
                     }
-                })
+                }
+            )
         }
     }
 }
