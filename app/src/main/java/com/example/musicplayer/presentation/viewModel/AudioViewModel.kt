@@ -54,15 +54,10 @@ class AudioViewModel(
     private val _repeatMode = MutableStateFlow(RepeatMode.REPEAT_ALL)
     private val _currentTrack = MutableStateFlow<AudioTrack?>(null)
     private val _isPlaying = MutableStateFlow(false)
-
     private var mediaController: MediaController? = null
-
     private val _playbackProgress = MutableStateFlow(0f)
     val playbackProgress: StateFlow<Float> = _playbackProgress.asStateFlow()
-
-
     private var pendingDeleteTrack: AudioTrack? = null
-
     private val filteredTracks: StateFlow<List<AudioTrack>> = combine(
         _tracks,
         _searchQuery,
@@ -331,8 +326,6 @@ class AudioViewModel(
                 if (file.exists()) {
                     file.delete()
                 }
-
-                // حذف از MediaStore
                 context.contentResolver.delete(
                     MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
                     "${MediaStore.Audio.Media._ID}=?",
@@ -388,7 +381,6 @@ class AudioViewModel(
                     val request = IntentSenderRequest.Builder(intentSender).build()
 
                     withContext(Dispatchers.Main) {
-                        // تغییر نام لانچر به deleteLauncher همگام با MainActivity
                         deleteRequestLauncher.launch(request)
                     }
                 } catch (ex: Exception) {
@@ -431,7 +423,6 @@ class AudioViewModel(
         pendingDeleteTrack?.let { track ->
             viewModelScope.launch(Dispatchers.IO) {
 
-                // ۱. برای اندروید ۱۰ (API 29) باید بعد از گرفتن تایید، عملیات حذف رو مجدداً صدا بزنیم
                 if (Build.VERSION.SDK_INT == Build.VERSION_CODES.Q) {
                     try {
                         val uri = ContentUris.withAppendedId(
@@ -444,12 +435,10 @@ class AudioViewModel(
                     }
                 }
 
-                // ۲. یک تاخیر خیلی کوتاه (۱۰۰ میلی‌ثانیه) جهت مطمئن شدن از سینک شدن MediaStore در اندروید ۱۱ به بالا
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                     delay(100)
                 }
 
-                // ۳. آپدیت کردن UI و لغو پخش در صورت حذف اهنگ جاری
                 withContext(Dispatchers.Main) {
                     if (_currentTrack.value?.id == track.id) {
                         mediaController?.pause()
@@ -457,10 +446,9 @@ class AudioViewModel(
                         _isPlaying.value = false
                     }
 
-                    // ریلود کردن لیست آهنگ‌ها
+
                     loadAudioFiles()
 
-                    // ریست کردن تراک در انتظار
                     pendingDeleteTrack = null
                 }
             }
