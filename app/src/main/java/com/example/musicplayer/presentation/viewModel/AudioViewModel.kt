@@ -27,6 +27,7 @@ import com.example.musicplayer.domain.GetAudioTracksUseCase
 import com.example.musicplayer.presentation.HomeUiState
 import com.example.musicplayer.presentation.RepeatMode
 import com.example.musicplayer.presentation.SortType
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -35,7 +36,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.guava.await
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 
 @ExperimentalMaterial3Api
 class AudioViewModel(
@@ -51,8 +55,6 @@ class AudioViewModel(
     private val _currentTrack = MutableStateFlow<AudioTrack?>(null)
     private val _isPlaying = MutableStateFlow(false)
 
-    private val _filteredTracks =
-        MutableStateFlow<List<AudioTrack>>(emptyList())
     private var mediaController: MediaController? = null
 
     private val _playbackProgress = MutableStateFlow(0f)
@@ -61,38 +63,57 @@ class AudioViewModel(
 
     private var pendingDeleteTrack: AudioTrack? = null
 
-    val uiState: StateFlow<HomeUiState> = combine(
+    private val filteredTracks: StateFlow<List<AudioTrack>> = combine(
         _tracks,
         _searchQuery,
-        _sortType,
-        _repeatMode,
-        _currentTrack,
-        _isPlaying,
-    ) {
-        val filtered = if (_searchQuery.value.isBlank()) _tracks.value else {
-            _tracks.value.filter {
-                it.title.contains(_searchQuery.value, ignoreCase = true) ||
-                        it.artist.contains(_searchQuery.value, ignoreCase = true)
+        _sortType
+    ) { tracks, query, sortType ->
+        val filtered =
+            if (query.isBlank()) {
+                tracks
+            } else {
+                tracks.filter {
+                    it.title.contains(query, true) ||
+                            it.artist.contains(query, true)
+                }
             }
+
+        when (sortType) {
+            SortType.ALPHABETICAL ->
+                filtered.sortedBy { it.title.lowercase() }
+
+            SortType.DATE_ADDED ->
+                filtered.sortedByDescending { it.dateAdded }
         }
-        val sorted = when (_sortType.value) {
-            SortType.ALPHABETICAL -> filtered.sortedBy { it.title.lowercase() }
-            SortType.DATE_ADDED -> filtered.sortedByDescending { it.dateAdded }
-        }
-        _filteredTracks.value = sorted
-        HomeUiState(
-            sorted,
-            _searchQuery.value,
-            _currentTrack.value,
-            _isPlaying.value,
-            _sortType.value,
-            _repeatMode.value
-        )
+
     }.stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5000),
-        initialValue = HomeUiState()
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5000),
+        emptyList()
     )
+    val uiState: StateFlow<HomeUiState> =
+        combine(
+            filteredTracks,
+            _searchQuery,
+            _currentTrack,
+            _isPlaying,
+            _sortType,
+            _repeatMode
+        ) {
+            HomeUiState(
+                tracks = filteredTracks.value,
+                searchQuery = _searchQuery.value,
+                currentTrack = _currentTrack.value,
+                isPlaying = _isPlaying.value,
+                sortType = _sortType.value,
+                repeatMode = _repeatMode.value
+            )
+
+        }.stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5000),
+            HomeUiState()
+        )
 
     init {
         loadAudioFiles()
@@ -174,7 +195,7 @@ class AudioViewModel(
 
             RepeatMode.REPEAT_ALL -> {
                 val current = _currentTrack.value
-                val list = _filteredTracks.value
+                val list = filteredTracks.value
                 if (list.isNotEmpty()) {
                     val index = current?.let { list.indexOf(it) } ?: -1
                     val nextIndex = if (index + 1 < list.size) index + 1 else 0
@@ -188,7 +209,7 @@ class AudioViewModel(
 
     private fun startProgressUpdater() {
         viewModelScope.launch {
-            while (true) {
+            while (isActive) {
                 delay(500)
                 val controller = mediaController
                 if (controller != null && controller.isPlaying) {
@@ -248,7 +269,7 @@ class AudioViewModel(
 
     fun nextTrack() {
         val current = _currentTrack.value ?: return
-        val list = _filteredTracks.value
+        val list = filteredTracks.value
         val index = list.indexOf(current)
         if (index in 0 until list.size - 1) {
             onTrackClick(list[index + 1])
@@ -259,7 +280,7 @@ class AudioViewModel(
 
     fun previousTrack() {
         val current = _currentTrack.value ?: return
-        val list = _filteredTracks.value
+        val list = filteredTracks.value
         val index = list.indexOf(current)
         if (index > 0) {
             onTrackClick(list[index - 1])
@@ -282,83 +303,173 @@ class AudioViewModel(
     }
 
 
-
-
-    @RequiresApi(Build.VERSION_CODES.Q)
     fun deleteTrack(track: AudioTrack) {
+        pendingDeleteTrack = track
+
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                pendingDeleteTrack = track
-                val uri = ContentUris.withAppendedId(
-                    MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
-                    track.id.toLong()
-                )
-                val pendingIntent = MediaStore.createDeleteRequest(
-                    context.contentResolver,
-                    listOf(uri)
-                )
-                val intentSender = pendingIntent.intentSender
-                val intentSenderRequest = IntentSenderRequest.Builder(intentSender).build()
-                deleteRequestLauncher.launch(intentSenderRequest)
-                Log.d("AudioViewModel", "Delete request launched (Android 11+)")
-            } else {
-                Log.d("AudioViewModel", "Direct delete (Android 10 or lower)")
-                performDelete(track)
+            when {
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> {
+                    deleteModern(track)
+                }
+                Build.VERSION.SDK_INT == Build.VERSION_CODES.Q -> {
+                    deleteScopedStorage(track)
+                }
+                else -> {
+                    deleteLegacy(track)
+                }
             }
         } catch (e: Exception) {
-            Log.e("AudioViewModel", "Error in deleteTrack", e)
-            performDelete(track)
+            Log.e("AudioViewModel", "Delete failed", e)
         }
     }
 
-    @RequiresApi(Build.VERSION_CODES.Q)
-    private fun performDelete(track: AudioTrack) {
-        viewModelScope.launch {
+    private fun deleteLegacy(track: AudioTrack) {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
-                val uri = ContentUris.withAppendedId(
+                val file = File(track.path)
+
+                if (file.exists()) {
+                    file.delete()
+                }
+
+                // حذف از MediaStore
+                context.contentResolver.delete(
                     MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
-                    track.id.toLong()
+                    "${MediaStore.Audio.Media._ID}=?",
+                    arrayOf(track.id)
                 )
-                val deleted = context.contentResolver.delete(uri, null, null)
-                if (deleted > 0) {
-                    Log.d("AudioViewModel", "Deleted: ${track.title}")
-                    _tracks.value = _tracks.value.filter { it.id != track.id }
+
+                withContext(Dispatchers.Main) {
                     if (_currentTrack.value?.id == track.id) {
                         mediaController?.pause()
                         _currentTrack.value = null
                         _isPlaying.value = false
                     }
-                } else {
-                    Log.e("AudioViewModel", "Failed to delete: ${track.title}")
+                    loadAudioFiles()
+                    pendingDeleteTrack = null
                 }
-            } catch (e: RecoverableSecurityException) {
-                Log.w("AudioViewModel", "RecoverableSecurityException, requesting permission...", e)
-                try {
-                    val intentSender = e.userAction.actionIntent.intentSender
-                    val intentSenderRequest = IntentSenderRequest.Builder(intentSender).build()
-                    pendingDeleteTrack = track
-                    deleteRequestLauncher.launch(intentSenderRequest)
-                } catch (ex: Exception) {
-                    Log.e("AudioViewModel", "Error requesting permission", ex)
-                }
+
+                Log.d("AudioViewModel", "Deleted successfully (Legacy)")
+
             } catch (e: Exception) {
-                Log.e("AudioViewModel", "Error deleting track", e)
+                Log.e("AudioViewModel", "deleteLegacy()", e)
             }
         }
     }
 
     @RequiresApi(Build.VERSION_CODES.Q)
+    private fun deleteScopedStorage(track: AudioTrack) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val uri = ContentUris.withAppendedId(
+                    MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                    track.id.toLong()
+                )
+
+                val deleted = context.contentResolver.delete(uri, null, null)
+
+                if (deleted > 0) {
+                    withContext(Dispatchers.Main) {
+                        if (_currentTrack.value?.id == track.id) {
+                            mediaController?.pause()
+                            _currentTrack.value = null
+                            _isPlaying.value = false
+                        }
+                        loadAudioFiles()
+                        pendingDeleteTrack = null
+                    }
+                    Log.d("AudioViewModel", "Track deleted (Q)")
+                }
+
+            } catch (e: RecoverableSecurityException) {
+                try {
+                    pendingDeleteTrack = track
+                    val intentSender = e.userAction.actionIntent.intentSender
+                    val request = IntentSenderRequest.Builder(intentSender).build()
+
+                    withContext(Dispatchers.Main) {
+                        // تغییر نام لانچر به deleteLauncher همگام با MainActivity
+                        deleteRequestLauncher.launch(request)
+                    }
+                } catch (ex: Exception) {
+                    Log.e("AudioViewModel", "Permission request failed", ex)
+                }
+            } catch (e: Exception) {
+                Log.e("AudioViewModel", "deleteScopedStorage()", e)
+            }
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.R)
+    private fun deleteModern(track: AudioTrack) {
+        try {
+            pendingDeleteTrack = track
+
+            val uri = ContentUris.withAppendedId(
+                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                track.id.toLong()
+            )
+
+            val pendingIntent = MediaStore.createDeleteRequest(
+                context.contentResolver,
+                listOf(uri)
+            )
+
+            val request = IntentSenderRequest.Builder(
+                pendingIntent.intentSender
+            ).build()
+
+            deleteRequestLauncher.launch(request)
+
+        } catch (e: Exception) {
+            Log.e("AudioViewModel", "deleteModern()", e)
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.R)
     fun onDeleteSuccess() {
-        pendingDeleteTrack?.let {
-            performDelete(it)
-            pendingDeleteTrack = null
+        pendingDeleteTrack?.let { track ->
+            viewModelScope.launch(Dispatchers.IO) {
+
+                // ۱. برای اندروید ۱۰ (API 29) باید بعد از گرفتن تایید، عملیات حذف رو مجدداً صدا بزنیم
+                if (Build.VERSION.SDK_INT == Build.VERSION_CODES.Q) {
+                    try {
+                        val uri = ContentUris.withAppendedId(
+                            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                            track.id.toLong()
+                        )
+                        context.contentResolver.delete(uri, null, null)
+                    } catch (e: Exception) {
+                        Log.e("AudioViewModel", "Failed to delete track on Android 10 after permission granted", e)
+                    }
+                }
+
+                // ۲. یک تاخیر خیلی کوتاه (۱۰۰ میلی‌ثانیه) جهت مطمئن شدن از سینک شدن MediaStore در اندروید ۱۱ به بالا
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    delay(100)
+                }
+
+                // ۳. آپدیت کردن UI و لغو پخش در صورت حذف اهنگ جاری
+                withContext(Dispatchers.Main) {
+                    if (_currentTrack.value?.id == track.id) {
+                        mediaController?.pause()
+                        _currentTrack.value = null
+                        _isPlaying.value = false
+                    }
+
+                    // ریلود کردن لیست آهنگ‌ها
+                    loadAudioFiles()
+
+                    // ریست کردن تراک در انتظار
+                    pendingDeleteTrack = null
+                }
+            }
         }
     }
 
     fun onDeleteCancel() {
         pendingDeleteTrack = null
     }
-
 
     fun shareTrack(track: AudioTrack) {
         try {
@@ -379,8 +490,6 @@ class AudioViewModel(
             Log.e("AudioViewModel", "Error sharing track: ${e.message}", e)
         }
     }
-
-
 
 }
 

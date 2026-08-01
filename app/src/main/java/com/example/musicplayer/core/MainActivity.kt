@@ -2,12 +2,12 @@ package com.example.musicplayer.core
 
 import android.annotation.SuppressLint
 import android.content.pm.PackageManager
-import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.annotation.RequiresApi
 import androidx.compose.material3.ExperimentalMaterial3Api
 import com.example.musicplayer.core.theme.MusicPlayerTheme
 import com.example.musicplayer.presentation.Navigation
@@ -16,27 +16,29 @@ import com.example.musicplayer.presentation.viewModel.viewModelFactory
 
 @ExperimentalMaterial3Api
 class MainActivity : ComponentActivity() {
-
-
     private lateinit var viewModel: AudioViewModel
-
-    @RequiresApi(Build.VERSION_CODES.Q)
-    private val deleteRequestLauncher = registerForActivityResult(
-            ActivityResultContracts.StartIntentSenderForResult()
-        ) { result ->
-            if (result.resultCode == RESULT_OK) {
-                viewModel.onDeleteSuccess()
-            } else {
-                viewModel.onDeleteCancel()
-            }
-        }
+    private lateinit var deleteLauncher: ActivityResultLauncher<IntentSenderRequest>
 
     @SuppressLint("NewApi")
-    @RequiresApi(Build.VERSION_CODES.Q)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        viewModel = viewModelFactory(applicationContext, this@MainActivity, deleteRequestLauncher)
+        deleteLauncher =
+            registerForActivityResult(
+                ActivityResultContracts.StartIntentSenderForResult()
+            ) { result ->
+
+                if (result.resultCode == RESULT_OK) {
+
+                    viewModel.onDeleteSuccess()
+
+                } else {
+
+                    viewModel.onDeleteCancel()
+
+                }
+            }
+        viewModel = viewModelFactory(applicationContext, this@MainActivity, deleteLauncher)
 
         setContent {
             MusicPlayerTheme {
