@@ -4,8 +4,8 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import androidx.activity.result.ActivityResultLauncher
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.example.musicplayer.presentation.viewModel.AudioViewModel
 
@@ -13,7 +13,7 @@ import com.example.musicplayer.presentation.viewModel.AudioViewModel
 fun requestPermissionsIfNeeded(
     viewModel: AudioViewModel,
     context: Context,
-    activity: MainActivity
+    permissionLauncher: ActivityResultLauncher<Array<String>>
 ) {
     val permissions = mutableListOf<String>()
 
@@ -31,8 +31,9 @@ fun requestPermissionsIfNeeded(
     }
 
     if (missingPermissions.isNotEmpty()) {
-        ActivityCompat.requestPermissions(activity, missingPermissions.toTypedArray(), 100)
+        permissionLauncher.launch(missingPermissions.toTypedArray())
     } else {
         viewModel.loadAudioFiles()
     }
 }
+

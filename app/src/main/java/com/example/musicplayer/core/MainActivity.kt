@@ -1,7 +1,6 @@
 package com.example.musicplayer.core
 
 import android.annotation.SuppressLint
-import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -18,48 +17,33 @@ import com.example.musicplayer.presentation.viewModel.viewModelFactory
 class MainActivity : ComponentActivity() {
     private lateinit var viewModel: AudioViewModel
     private lateinit var deleteLauncher: ActivityResultLauncher<IntentSenderRequest>
+    private lateinit var permissionLauncher: ActivityResultLauncher<Array<String>>
 
     @SuppressLint("NewApi")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        deleteLauncher =
-            registerForActivityResult(
-                ActivityResultContracts.StartIntentSenderForResult()
-            ) { result ->
-
-                if (result.resultCode == RESULT_OK) {
-
-                    viewModel.onDeleteSuccess()
-
-                } else {
-
-                    viewModel.onDeleteCancel()
-
-                }
+        deleteLauncher = registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
+                if (result.resultCode == RESULT_OK) viewModel.onDeleteSuccess() else viewModel.onDeleteCancel()
             }
+
         viewModel = viewModelFactory(applicationContext, this@MainActivity, deleteLauncher)
+
+        permissionLauncher = registerForActivityResult(
+            ActivityResultContracts.RequestMultiplePermissions()
+        ) { result ->
+            val allGranted = result.values.all { it }
+            if (allGranted) {
+                viewModel.loadAudioFiles()
+            }
+        }
+
+        requestPermissionsIfNeeded(viewModel, this, permissionLauncher)
 
         setContent {
             MusicPlayerTheme {
                 Navigation(viewModel = viewModel)
             }
-        }
-        requestPermissionsIfNeeded(viewModel, this, this)
-    }
-
-
-    @Suppress("UNCHECKED_CAST")
-    override fun onRequestPermissionsResult(
-        requestCode: Int,
-        permissions: Array<out String>,
-        grantResults: IntArray,
-        deviceId: Int
-    ) {
-        @Suppress("DEPRECATION")
-        super.onRequestPermissionsResult(requestCode, permissions as Array<String>, grantResults)
-        if (requestCode == 100 && grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-            viewModel.loadAudioFiles()
         }
     }
 }
