@@ -487,7 +487,6 @@ class AudioViewModel(
         if (pendingDeleteTracks.isEmpty()) return
 
         if (Build.VERSION.SDK_INT == Build.VERSION_CODES.Q) {
-            // در اندروید ۱۰، فایل جاری تایید شده و حذف می‌شود، سپس فایل بعدی پردازش خواهد شد
             val currentTrack = pendingDeleteTracks.firstOrNull()
             if (currentTrack != null) {
                 viewModelScope.launch(Dispatchers.IO) {
@@ -508,15 +507,12 @@ class AudioViewModel(
                             _currentTrack.value = null
                             _isPlaying.value = false
                         }
-
-                        // رفتن به سراغ آهنگ بعدی در صف
                         pendingDeleteTracks = pendingDeleteTracks.drop(1)
                         processNextPendingDeleteQ()
                     }
                 }
             }
         } else {
-            // در اندروید ۱۱ به بالا (R+) همه یک‌جا حذف شده‌اند
             viewModelScope.launch(Dispatchers.IO) {
                 delay(200)
                 withContext(Dispatchers.Main) {
