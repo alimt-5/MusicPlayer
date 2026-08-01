@@ -1,5 +1,8 @@
 package com.example.musicplayer.domain
 
+import androidx.compose.runtime.Immutable
+
+@Immutable
 data class AudioTrack(
     val id: String,
     val title: String,
