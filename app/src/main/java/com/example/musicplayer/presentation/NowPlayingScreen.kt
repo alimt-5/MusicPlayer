@@ -127,7 +127,7 @@ fun NowPlayingScreen(viewModel: AudioViewModel, onBack: () -> Unit) {
             }
 
             Text(
-                text = "Now Playing",
+                text = state.currentTrack?.title ?: "Unknown",
                 style = MaterialTheme.typography.titleLarge,
                 color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.weight(1f)

@@ -13,7 +13,6 @@ import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.IntentSenderRequest
 import androidx.annotation.RequiresApi
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.MediaItem
@@ -124,14 +123,12 @@ class AudioViewModel(
 
     init {
         loadAudioFiles()
-        startPlaybackServiceAndBind()
+        connectToPlaybackService()
         startProgressUpdater()
     }
 
     @SuppressLint("UnsafeOptInUsageError")
-    private fun startPlaybackServiceAndBind() {
-        val intent = Intent(context, PlaybackService::class.java)
-        ContextCompat.startForegroundService(context, intent)
+    private fun connectToPlaybackService() {
         bindToPlaybackService()
     }
 
@@ -165,52 +162,28 @@ class AudioViewModel(
     }
 
     private val playerListener = object : Player.Listener {
+
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             _isPlaying.value = isPlaying
         }
 
-        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-            syncPlayerState()
+        override fun onMediaItemTransition(
+            mediaItem: MediaItem?,
+            reason: Int
+        ) {
+            val mediaId = mediaItem?.mediaId ?: return
+
+            _currentTrack.value = _tracks.value.firstOrNull {
+                it.id == mediaId
+            }
+
+            _playbackProgress.value = 0f
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
-            if (playbackState == Player.STATE_ENDED) {
-                handlePlaybackEnd()
+            if (playbackState == Player.STATE_READY) {
+                syncPlayerState()
             }
-        }
-    }
-
-    private fun handlePlaybackEnd() {
-        when (_repeatMode.value) {
-            RepeatMode.REPEAT_ONE -> {
-                _currentTrack.value?.let { track ->
-                    val mediaItem = MediaItem.Builder()
-                        .setUri(track.mediaUri)
-                        .setMediaId(track.id)
-                        .setMediaMetadata(
-                            MediaMetadata.Builder()
-                                .setTitle(track.title)
-                                .setArtist(track.artist)
-                                .build()
-                        )
-                        .build()
-                    mediaController?.setMediaItem(mediaItem)
-                    mediaController?.prepare()
-                    mediaController?.play()
-                }
-            }
-
-            RepeatMode.REPEAT_ALL -> {
-                val current = _currentTrack.value
-                val list = filteredTracks.value
-                if (list.isNotEmpty()) {
-                    val index = current?.let { list.indexOf(it) } ?: -1
-                    val nextIndex = if (index + 1 < list.size) index + 1 else 0
-                    onTrackClick(list[nextIndex])
-                }
-            }
-
-            RepeatMode.OFF -> {}
         }
     }
 
@@ -259,29 +232,57 @@ class AudioViewModel(
     }
 
     fun toggleRepeatMode() {
-        _repeatMode.value = when (_repeatMode.value) {
+        val newMode = when (_repeatMode.value) {
             RepeatMode.REPEAT_ALL -> RepeatMode.REPEAT_ONE
-            RepeatMode.OFF -> RepeatMode.REPEAT_ALL
             RepeatMode.REPEAT_ONE -> RepeatMode.OFF
+            RepeatMode.OFF -> RepeatMode.REPEAT_ALL
+        }
+
+        _repeatMode.value = newMode
+
+        mediaController?.repeatMode = when (newMode) {
+            RepeatMode.OFF -> Player.REPEAT_MODE_OFF
+            RepeatMode.REPEAT_ONE -> Player.REPEAT_MODE_ONE
+            RepeatMode.REPEAT_ALL -> Player.REPEAT_MODE_ALL
         }
     }
 
     fun onTrackClick(track: AudioTrack) {
-        _currentTrack.value = track
-        val mediaItem = MediaItem.Builder()
-            .setUri(track.mediaUri)
-            .setMediaId(track.id)
-            .setMediaMetadata(
-                MediaMetadata.Builder()
-                    .setTitle(track.title)
-                    .setArtist(track.artist)
-                    .build()
-            )
-            .build()
+        val controller = mediaController ?: return
+        val playlist = filteredTracks.value
 
-        mediaController?.setMediaItem(mediaItem)
-        mediaController?.prepare()
-        mediaController?.play()
+        if (playlist.isEmpty()) return
+
+        val selectedIndex = playlist.indexOfFirst { it.id == track.id }
+            .takeIf { it >= 0 }
+            ?: return
+
+        val mediaItems = playlist.map { audioTrack ->
+            MediaItem.Builder()
+                .setMediaId(audioTrack.id)
+                .setUri(audioTrack.mediaUri)
+                .setMediaMetadata(
+                    MediaMetadata.Builder()
+                        .setTitle(audioTrack.title)
+                        .setArtist(
+                            audioTrack.artist.ifBlank { "Unknown artist" }
+                        )
+                        .setAlbumTitle(audioTrack.albumArtUri)
+                        .build()
+                )
+                .build()
+        }
+
+        _currentTrack.value = track
+
+        controller.setMediaItems(
+            mediaItems,
+            selectedIndex,
+            0L
+        )
+
+        controller.prepare()
+        controller.play()
     }
 
     fun togglePlayPause() {
@@ -290,24 +291,31 @@ class AudioViewModel(
     }
 
     fun nextTrack() {
-        val current = _currentTrack.value ?: return
-        val list = filteredTracks.value
-        val index = list.indexOf(current)
-        if (index in 0 until list.size - 1) {
-            onTrackClick(list[index + 1])
-        } else if (_repeatMode.value == RepeatMode.REPEAT_ALL && list.isNotEmpty()) {
-            onTrackClick(list[0])
+        val controller = mediaController ?: return
+
+        if (controller.hasNextMediaItem()) {
+            controller.seekToNextMediaItem()
+            controller.play()
+        } else if (_repeatMode.value == RepeatMode.REPEAT_ALL) {
+            controller.seekToDefaultPosition(0)
+            controller.play()
         }
     }
 
     fun previousTrack() {
-        val current = _currentTrack.value ?: return
-        val list = filteredTracks.value
-        val index = list.indexOf(current)
-        if (index > 0) {
-            onTrackClick(list[index - 1])
-        } else if (_repeatMode.value == RepeatMode.REPEAT_ALL && list.isNotEmpty()) {
-            onTrackClick(list.last())
+        val controller = mediaController ?: return
+
+        if (controller.currentPosition > 3_000L) {
+            controller.seekTo(0L)
+            return
+        }
+
+        if (controller.hasPreviousMediaItem()) {
+            controller.seekToPreviousMediaItem()
+            controller.play()
+        } else if (_repeatMode.value == RepeatMode.REPEAT_ALL) {
+            controller.seekToDefaultPosition(controller.mediaItemCount - 1)
+            controller.play()
         }
     }
 
