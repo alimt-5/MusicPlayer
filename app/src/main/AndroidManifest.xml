@@ -15,6 +15,7 @@
 
 
     <application
+        android:name=".musicFeature.core.MusicPlayerApplication"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
@@ -26,7 +27,7 @@
         android:theme="@style/Theme.MusicPlayer"
         tools:targetApi="31">
         <activity
-            android:name=".core.MainActivity"
+            android:name=".musicFeature.core.MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
             android:theme="@style/Theme.MusicPlayer">
@@ -36,7 +37,7 @@
             </intent-filter>
         </activity>
         <service
-            android:name=".data.PlaybackService"
+            android:name=".musicFeature.data.servises.PlaybackService"
             android:exported="true"
             android:foregroundServiceType="mediaPlayback"
             tools:ignore="ExportedService,ForegroundServicePermission">

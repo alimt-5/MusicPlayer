@@ -1,6 +1,9 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
+    id("kotlin-kapt")
+    alias(libs.plugins.kotlin.compose)
+    id("com.google.dagger.hilt.android")
 }
 
 android {
@@ -60,7 +63,6 @@ dependencies {
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
     implementation(libs.androidx.navigation.compose)
-    implementation(libs.car.ui.lib)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
@@ -68,6 +70,12 @@ dependencies {
     androidTestImplementation(libs.androidx.ui.test.junit4)
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
+    //hilt
+    implementation("com.google.dagger:hilt-android:2.57.1")
+    kapt("com.google.dagger:hilt-android-compiler:2.57.1")
+    implementation("androidx.hilt:hilt-lifecycle-viewmodel:1.0.0-alpha03")
+    kapt("androidx.hilt:hilt-compiler:1.2.0")
+    implementation("androidx.hilt:hilt-navigation-compose:1.3.0")
 
     // Media3 (ExoPlayer + MediaSession)
     val media3Version = "1.5.0"
