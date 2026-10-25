@@ -95,4 +95,6 @@ dependencies {
     implementation("io.coil-kt:coil-compose:2.6.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
 
+    implementation("androidx.datastore:datastore-preferences:1.2.1")
+
 }
