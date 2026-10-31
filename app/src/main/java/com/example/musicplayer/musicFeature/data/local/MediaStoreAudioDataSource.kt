@@ -4,45 +4,46 @@ import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
 import android.database.ContentObserver
-import android.media.MediaExtractor
-import android.media.MediaFormat
 import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
+import android.util.Log
 import androidx.annotation.RequiresApi
 import androidx.core.net.toUri
 import com.example.musicplayer.musicFeature.core.platform.storage.RecoverableDeleteException
 import com.example.musicplayer.musicFeature.core.platform.storage.RecoverableRenameException
 import com.example.musicplayer.musicFeature.domain.model.AudioTrack
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.merge
-import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
-import kotlin.time.Duration.Companion.microseconds
+import kotlin.time.Duration.Companion.milliseconds
 
 @Singleton
 class MediaStoreAudioDataSource @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
     private val resolver = context.contentResolver
-    private val manualRefreshes = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    private val manualRefreshes = Channel<Unit>(Channel.CONFLATED)
     private val renamedTitles = context.getSharedPreferences("music_renamed_titles", Context.MODE_PRIVATE)
 
     @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
@@ -54,19 +55,17 @@ class MediaStoreAudioDataSource @Inject constructor(
                 }
             }
             resolver.registerContentObserver(audioCollectionUri(), true, observer)
-            trySend(Unit)
             awaitClose { resolver.unregisterContentObserver(observer) }
         }
-
-        return merge(changes, manualRefreshes)
-            .onStart { emit(Unit) }
-            .debounce(200.microseconds)
+        return merge(changes, manualRefreshes.receiveAsFlow())
+            .debounce(250.milliseconds)
             .mapLatest { queryAudioTracks() }
+            .filterNotNull()
             .flowOn(Dispatchers.IO)
     }
 
     fun refresh() {
-        manualRefreshes.tryEmit(Unit)
+        manualRefreshes.trySend(Unit)
     }
 
     suspend fun deleteTracks(tracks: List<AudioTrack>) {
@@ -256,11 +255,19 @@ class MediaStoreAudioDataSource @Inject constructor(
         )?.use { it.moveToFirst() } == true
     }
 
-    private fun queryAudioTracks(): List<AudioTrack> {
-        return runCatching {
+    private fun queryAudioTracks(): List<AudioTrack>? {
+        return try {
             queryAudioTracksInternal()
-        }.getOrElse { error ->
-            if (error is SecurityException) emptyList() else throw error
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: SecurityException) {
+            // A permission failure is not an empty library. Keep the last valid snapshot and
+            // never let a temporary access issue prune the active playback queue.
+            Log.w("MediaStoreAudio", "Audio library permission is unavailable", error)
+            null
+        } catch (error: Exception) {
+            Log.e("MediaStoreAudio", "Could not query the audio library", error)
+            null
         }
     }
 
@@ -322,10 +329,6 @@ class MediaStoreAudioDataSource @Inject constructor(
                 if (mime != null && !mime.lowercase(Locale.ROOT).startsWith("audio/")) continue
                 if (size <= 0L || durationMs <= 1_000L) continue
                 if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q && filePath != null && !File(filePath).exists()) continue
-                // MediaStore can occasionally retain a row after the underlying file has been
-                // moved or deleted. Do not expose a URI that ExoPlayer cannot open.
-                if (!canOpenMediaUri(mediaUri)) continue
-
                 val overrideTitle = renamedTitles.getString(idTitleKey(id), null)
                     ?: pathTitleKey(filePath)?.let { key -> renamedTitles.getString(key, null) }
                 val title = overrideTitle ?: rawTitle
@@ -364,7 +367,9 @@ class MediaStoreAudioDataSource @Inject constructor(
                     identityToIndex[fallbackIdentity] = existingIndex
                     pathIdentity?.let { identityToIndex[it] = existingIndex }
                     val existing = tracks[existingIndex]
-                    if (!canReadAudio(existing.mediaUri) && canReadAudio(track.mediaUri)) {
+                    // Validate only duplicate candidates. Opening every MediaStore URI during
+                    // startup causes one provider I/O operation per song and makes large libraries slow.
+                    if (!canOpenMediaUri(existing.mediaUri) && canOpenMediaUri(track.mediaUri)) {
                         tracks[existingIndex] = track
                     }
                 }
@@ -382,7 +387,8 @@ class MediaStoreAudioDataSource @Inject constructor(
 
     private fun physicalPathIdentity(path: String?): String? {
         if (path.isNullOrBlank()) return null
-        val normalized = runCatching { File(path).canonicalPath }.getOrDefault(path)
+        // absolutePath is lexical and avoids filesystem canonicalization for every song.
+        val normalized = File(path).absolutePath.replace(File.separatorChar, '/').trimEnd('/')
         return "path:${normalized.trim().lowercase(Locale.ROOT)}"
     }
 
@@ -410,20 +416,6 @@ class MediaStoreAudioDataSource @Inject constructor(
     private fun canOpenMediaUri(uriString: String): Boolean = runCatching {
         resolver.openFileDescriptor(uriString.toUri(), "r")?.use { true } ?: false
     }.getOrDefault(false)
-
-    private fun canReadAudio(uriString: String): Boolean {
-        val extractor = MediaExtractor()
-        return try {
-            extractor.setDataSource(context, uriString.toUri(), null)
-            (0 until extractor.trackCount).any { index ->
-                extractor.getTrackFormat(index).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true
-            }
-        } catch (_: Exception) {
-            false
-        } finally {
-            runCatching { extractor.release() }
-        }
-    }
 
     private fun buildSelection(): String = buildList {
         add("${MediaStore.Audio.Media.IS_MUSIC} != 0")

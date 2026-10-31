@@ -1,16 +1,21 @@
 package com.example.musicplayer.musicFeature.presentation.screens.player
 
+import android.annotation.SuppressLint
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
@@ -47,6 +52,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -55,10 +61,11 @@ import com.example.musicplayer.R
 import com.example.musicplayer.musicFeature.domain.model.AudioTrack
 import com.example.musicplayer.musicFeature.domain.model.PlaybackPosition
 import com.example.musicplayer.musicFeature.domain.model.RepeatMode
-import com.example.musicplayer.musicFeature.presentation.viewmodel.MusicViewModel
 import com.example.musicplayer.musicFeature.presentation.screens.list.RenameSongDialog
+import com.example.musicplayer.musicFeature.presentation.viewmodel.MusicViewModel
 import java.util.concurrent.TimeUnit
 
+@SuppressLint("UnusedBoxWithConstraintsScope")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NowPlayingScreen(viewModel: MusicViewModel, onBack: () -> Unit) {
@@ -103,60 +110,76 @@ fun NowPlayingScreen(viewModel: MusicViewModel, onBack: () -> Unit) {
             )
         }
     ) { padding ->
-        Column(
-            modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(padding).padding(20.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+                .padding(padding)
         ) {
-            AsyncImage(
-                model = currentTrack?.albumArtUri,
-                contentDescription = null,
-                modifier = Modifier.size(260.dp).clip(RoundedCornerShape(24.dp)),
-                contentScale = ContentScale.Crop,
-                error = painterResource(R.drawable.app_icon),
-                placeholder = painterResource(R.drawable.app_icon)
-            )
-            Spacer(Modifier.height(24.dp))
-            Text(currentTrack?.title ?: "Unknown", style = MaterialTheme.typography.headlineSmall, maxLines = 1)
-            Text(currentTrack?.artist ?: "Unknown", style = MaterialTheme.typography.titleMedium, maxLines = 1)
-            Spacer(Modifier.height(26.dp))
-            Slider(
-                value = sliderValue,
-                onValueChange = {
-                    isDragging = true
-                    dragProgress = it
-                },
-                onValueChangeFinished = {
-                    isDragging = false
-                    viewModel.seekTo(dragProgress)
-                },
-                modifier = Modifier.fillMaxWidth()
-            )
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(formatTime((duration * sliderValue).toLong()), style = MaterialTheme.typography.bodySmall)
-                Text(formatTime(duration), style = MaterialTheme.typography.bodySmall)
-            }
-            Spacer(Modifier.height(22.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically
+            val configuration = LocalConfiguration.current
+            val isLandscape = configuration.screenWidthDp > configuration.screenHeightDp
+            val albumArtSize = if (isLandscape) 160.dp else 260.dp
+            val scrollState = rememberScrollState()
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = maxHeight)
+                    .verticalScroll(scrollState)
+                    .padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
             ) {
-                IconButton(onClick = viewModel::toggleRepeatMode) {
-                    val icon = if (state.repeatMode == RepeatMode.REPEAT_ONE) Icons.Default.RepeatOne else Icons.Default.Repeat
-                    val tint = if (state.repeatMode == RepeatMode.OFF) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary
-                    Icon(icon, null, tint = tint)
+                AsyncImage(
+                    model = currentTrack?.albumArtUri,
+                    contentDescription = null,
+                    modifier = Modifier.size(albumArtSize).clip(RoundedCornerShape(24.dp)),
+                    contentScale = ContentScale.Crop,
+                    error = painterResource(R.drawable.app_icon),
+                    placeholder = painterResource(R.drawable.app_icon)
+                )
+                Spacer(Modifier.height(if (isLandscape) 12.dp else 24.dp))
+                Text(currentTrack?.title ?: "Unknown", style = MaterialTheme.typography.headlineSmall, maxLines = 1)
+                Text(currentTrack?.artist ?: "Unknown", style = MaterialTheme.typography.titleMedium, maxLines = 1)
+                Spacer(Modifier.height(if (isLandscape) 14.dp else 26.dp))
+                Slider(
+                    value = sliderValue,
+                    onValueChange = {
+                        isDragging = true
+                        dragProgress = it
+                    },
+                    onValueChangeFinished = {
+                        isDragging = false
+                        viewModel.seekTo(dragProgress)
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(formatTime((duration * sliderValue).toLong()), style = MaterialTheme.typography.bodySmall)
+                    Text(formatTime(duration), style = MaterialTheme.typography.bodySmall)
                 }
-                IconButton(onClick = viewModel::previous) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Previous") }
-                IconButton(onClick = viewModel::togglePlayPause, modifier = Modifier.size(72.dp)) {
-                    Icon(
-                        if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                        null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(44.dp)
-                    )
+                Spacer(Modifier.height(if (isLandscape) 12.dp else 22.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = viewModel::toggleRepeatMode) {
+                        val icon = if (state.repeatMode == RepeatMode.REPEAT_ONE) Icons.Default.RepeatOne else Icons.Default.Repeat
+                        val tint = if (state.repeatMode == RepeatMode.OFF) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary
+                        Icon(icon, null, tint = tint)
+                    }
+                    IconButton(onClick = viewModel::previous) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Previous") }
+                    IconButton(onClick = viewModel::togglePlayPause, modifier = Modifier.size(72.dp)) {
+                        Icon(
+                            if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(44.dp)
+                        )
+                    }
+                    IconButton(onClick = viewModel::next) { Icon(Icons.AutoMirrored.Filled.ArrowForward, "Next") }
                 }
-                IconButton(onClick = viewModel::next) { Icon(Icons.AutoMirrored.Filled.ArrowForward, "Next") }
             }
         }
     }

@@ -11,6 +11,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -20,6 +21,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.navigation.compose.rememberNavController
 import com.example.musicplayer.musicFeature.presentation.model.MusicEffect
 import com.example.musicplayer.musicFeature.presentation.navigation.Navigation
@@ -28,6 +32,7 @@ import com.example.musicplayer.musicFeature.presentation.viewmodel.MusicViewMode
 @Composable
 fun MusicPlayerApp(viewModel: MusicViewModel = hiltViewModel()) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val navController = rememberNavController()
     var audioPermissionGranted by rememberSaveable { mutableStateOf(hasAudioPermission(context)) }
     var permissionRequested by rememberSaveable { mutableStateOf(false) }
@@ -60,6 +65,20 @@ fun MusicPlayerApp(viewModel: MusicViewModel = hiltViewModel()) {
         ActivityResultContracts.StartIntentSenderForResult()
     ) { result ->
         viewModel.onRenameConfirmationResult(result.resultCode == Activity.RESULT_OK)
+    }
+
+    DisposableEffect(lifecycleOwner, audioPermissionGranted) {
+        if (!audioPermissionGranted) {
+            onDispose { }
+        } else {
+            val observer = LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_START) {
+                    viewModel.ensurePlaybackConnected()
+                }
+            }
+            lifecycleOwner.lifecycle.addObserver(observer)
+            onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+        }
     }
 
     LaunchedEffect(audioPermissionGranted) {

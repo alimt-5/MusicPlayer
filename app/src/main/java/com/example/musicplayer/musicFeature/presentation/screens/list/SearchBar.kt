@@ -11,9 +11,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DateRange
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SortByAlpha
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -23,7 +21,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.musicplayer.musicFeature.domain.model.SortType
@@ -59,21 +56,6 @@ fun SearchBar(state: HomeUiState, viewModel: MusicViewModel) {
             selected = state.sortType == SortType.DATE_ADDED,
             onClick = { viewModel.chooseSortType(SortType.DATE_ADDED) }
         )
-        Column(
-            modifier = Modifier
-                .size(46.dp)
-                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp))
-                .clickable(enabled = !state.isLoading, onClick = viewModel::refresh)
-                .padding(6.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            if (state.isLoading) {
-                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-            } else {
-                Icon(Icons.Default.Refresh, contentDescription = "Refresh", modifier = Modifier.size(18.dp))
-            }
-            Text(if (state.isLoading) "..." else "↻", fontSize = 8.sp, textAlign = TextAlign.Center)
-        }
     }
 }
 

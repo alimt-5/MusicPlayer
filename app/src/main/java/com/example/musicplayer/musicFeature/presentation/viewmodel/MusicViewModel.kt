@@ -75,7 +75,9 @@ class MusicViewModel @Inject constructor(
     private val selectionMode = MutableStateFlow(false)
     private val selectedIds = MutableStateFlow<Set<Long>>(emptySet())
     private val loading = MutableStateFlow(true)
+    private val hasLoadedTrackSnapshot = MutableStateFlow(false)
     private val effectsInternal = MutableSharedFlow<MusicEffect>(extraBufferCapacity = 16)
+    private var playbackConnectionJob: Job? = null
 
     val effects = effectsInternal.asSharedFlow()
 
@@ -85,8 +87,11 @@ class MusicViewModel @Inject constructor(
             effectsInternal.emit(MusicEffect.ShowMessage("Could not read the music library"))
             emit(emptyList())
         }
-        .onEach { loading.value = false }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+        .onEach {
+            hasLoadedTrackSnapshot.value = true
+            loading.value = false
+        }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     private val trackById: StateFlow<Map<Long, AudioTrack>> = allTracks
         .map { tracks -> tracks.associateBy(AudioTrack::id) }
@@ -157,12 +162,12 @@ class MusicViewModel @Inject constructor(
     private var pendingRename: PendingRename? = null
 
     init {
-        viewModelScope.launch {
-            runCatching { connectPlayback() }
-                .onFailure { effectsInternal.emit(MusicEffect.ShowMessage("Player connection failed")) }
-        }
+        ensurePlaybackConnected()
         viewModelScope.launch {
             allTracks.collect { tracks ->
+                // Do not prune a live MediaSession queue using StateFlow's temporary initial [].
+                if (!hasLoadedTrackSnapshot.value) return@collect
+
                 val availableIds = tracks.mapTo(HashSet(tracks.size), AudioTrack::id)
                 val currentTrackId = playbackState.value.currentTrackId
                 if (currentTrackId != null && currentTrackId !in availableIds) {
@@ -173,11 +178,20 @@ class MusicViewModel @Inject constructor(
             }
         }
     }
+    fun ensurePlaybackConnected() {
+        if (playbackConnectionJob?.isActive == true) return
+        playbackConnectionJob = viewModelScope.launch {
+            runCatching { connectPlayback() }
+                .onFailure { error ->
+                    Log.w("MusicPlayback", "Could not reconnect to playback service", error)
+                }
+        }
+    }
 
     fun refresh() {
         if (deleteJob?.isActive == true) return
         viewModelScope.launch {
-            loading.value = true
+            if (allTracks.value.isEmpty()) loading.value = true
             runCatching { refreshAudioTracks() }
                 .onFailure {
                     loading.value = false
