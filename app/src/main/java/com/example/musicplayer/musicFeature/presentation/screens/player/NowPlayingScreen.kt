@@ -1,6 +1,5 @@
 package com.example.musicplayer.musicFeature.presentation.screens.player
 
-import android.annotation.SuppressLint
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -65,7 +64,6 @@ import com.example.musicplayer.musicFeature.presentation.screens.list.RenameSong
 import com.example.musicplayer.musicFeature.presentation.viewmodel.MusicViewModel
 import java.util.concurrent.TimeUnit
 
-@SuppressLint("UnusedBoxWithConstraintsScope")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NowPlayingScreen(viewModel: MusicViewModel, onBack: () -> Unit) {

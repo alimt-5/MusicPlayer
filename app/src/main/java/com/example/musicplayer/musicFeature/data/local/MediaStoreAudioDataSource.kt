@@ -4,6 +4,8 @@ import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
 import android.database.ContentObserver
+import android.media.MediaExtractor
+import android.media.MediaFormat
 import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
@@ -45,6 +47,7 @@ class MediaStoreAudioDataSource @Inject constructor(
     private val resolver = context.contentResolver
     private val manualRefreshes = Channel<Unit>(Channel.CONFLATED)
     private val renamedTitles = context.getSharedPreferences("music_renamed_titles", Context.MODE_PRIVATE)
+    private val playbackPreferences = context.getSharedPreferences("music_playback", Context.MODE_PRIVATE)
 
     @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
     fun observeAudioTracks(): Flow<List<AudioTrack>> {
@@ -57,6 +60,9 @@ class MediaStoreAudioDataSource @Inject constructor(
             resolver.registerContentObserver(audioCollectionUri(), true, observer)
             awaitClose { resolver.unregisterContentObserver(observer) }
         }
+
+        // The first scan is requested explicitly by the ViewModel after audio permission is granted.
+        // This prevents an automatic scan and a manual initial refresh from running back-to-back.
         return merge(changes, manualRefreshes.receiveAsFlow())
             .debounce(250.milliseconds)
             .mapLatest { queryAudioTracks() }
@@ -349,8 +355,6 @@ class MediaStoreAudioDataSource @Inject constructor(
 
                 val pathIdentity = physicalPathIdentity(filePath)
                 val fallbackIdentity = fallbackIdentity(
-                    volumeName = volumeName,
-                    relativePath = relativePath,
                     displayName = displayName,
                     size = size,
                     durationMs = durationMs,
@@ -367,9 +371,19 @@ class MediaStoreAudioDataSource @Inject constructor(
                     identityToIndex[fallbackIdentity] = existingIndex
                     pathIdentity?.let { identityToIndex[it] = existingIndex }
                     val existing = tracks[existingIndex]
-                    // Validate only duplicate candidates. Opening every MediaStore URI during
-                    // startup causes one provider I/O operation per song and makes large libraries slow.
-                    if (!canOpenMediaUri(existing.mediaUri) && canOpenMediaUri(track.mediaUri)) {
+                    // Validate only duplicate candidates. This keeps the initial scan fast while
+                    // preventing a stale MediaStore row from winning over a playable duplicate.
+                    val existingOpenable = canOpenMediaUri(existing.mediaUri)
+                    val candidateOpenable = canOpenMediaUri(track.mediaUri)
+                    val existingPlayable = existingOpenable && canReadAudio(existing.mediaUri)
+                    val candidatePlayable = candidateOpenable && canReadAudio(track.mediaUri)
+                    val lastPlayedId = playbackPreferences.getLong("last_track_id", -1L)
+                    val candidateIsLastPlayed = track.id == lastPlayedId
+                    val existingIsLastPlayed = existing.id == lastPlayedId
+                    if ((!existingPlayable && candidatePlayable) ||
+                        (!existingOpenable && candidateOpenable) ||
+                        (existingPlayable && candidatePlayable && candidateIsLastPlayed && !existingIsLastPlayed)
+                    ) {
                         tracks[existingIndex] = track
                     }
                 }
@@ -393,29 +407,47 @@ class MediaStoreAudioDataSource @Inject constructor(
     }
 
     private fun fallbackIdentity(
-        volumeName: String?,
-        relativePath: String?,
         displayName: String,
         size: Long,
         durationMs: Long,
         title: String,
         artist: String
     ): String {
-        val volume = volumeName.orEmpty().lowercase(Locale.ROOT)
+        // Ignore storage volume and relative folder here. Some devices expose the same
+        // underlying audio entry through more than one MediaStore volume/row. A content
+        // fingerprint avoids showing those rows twice. Size + duration + display name +
+        // title + artist makes accidental collisions uncommon; real files with different
+        // metadata remain separate. Physical paths are still preferred above this fallback.
         val normalizedName = displayName.trim().lowercase(Locale.ROOT)
         val normalizedTitle = title.trim().lowercase(Locale.ROOT)
         val normalizedArtist = artist.trim().lowercase(Locale.ROOT)
-        val location = relativePath?.trim('/')?.lowercase(Locale.ROOT)
-        return if (!location.isNullOrBlank()) {
-            "relative:$volume/$location/$normalizedName|$size|$durationMs|$normalizedTitle|$normalizedArtist"
-        } else {
-            "fingerprint:$volume/$normalizedName|$size|$durationMs|$normalizedTitle|$normalizedArtist"
-        }
+        return "fingerprint:$normalizedName|$size|$durationMs|$normalizedTitle|$normalizedArtist"
     }
 
     private fun canOpenMediaUri(uriString: String): Boolean = runCatching {
         resolver.openFileDescriptor(uriString.toUri(), "r")?.use { true } ?: false
     }.getOrDefault(false)
+
+    /**
+     * Checks the audio container only when two rows look like the same file.
+     * This is intentionally not run for every library item because it is more expensive
+     * than the basic MediaStore query and would slow down first launch.
+     */
+    private fun canReadAudio(uriString: String): Boolean {
+        val extractor = MediaExtractor()
+        return try {
+            extractor.setDataSource(context, uriString.toUri(), null)
+            (0 until extractor.trackCount).any { index ->
+                extractor.getTrackFormat(index)
+                    .getString(MediaFormat.KEY_MIME)
+                    ?.startsWith("audio/") == true
+            }
+        } catch (_: Exception) {
+            false
+        } finally {
+            runCatching { extractor.release() }
+        }
+    }
 
     private fun buildSelection(): String = buildList {
         add("${MediaStore.Audio.Media.IS_MUSIC} != 0")

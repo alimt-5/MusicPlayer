@@ -10,6 +10,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.Timeline
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.example.musicplayer.musicFeature.domain.model.AudioTrack
@@ -83,6 +84,15 @@ class Media3PlaybackRepository @Inject constructor(
         override fun onPlaybackStateChanged(playbackState: Int) {
             if (playbackState == Player.STATE_IDLE) {
                 stateInternal.value = stateInternal.value.copy(currentTrackId = null, isPlaying = false)
+            }
+        }
+
+        override fun onTimelineChanged(timeline: Timeline, reason: Int) {
+            // PlaybackService may remove an unreadable item and continue with the next one.
+            // Keep the local queue signature synchronized with the MediaSession playlist.
+            val connected = controller ?: return
+            queueIds = (0 until connected.mediaItemCount).mapNotNull { index ->
+                connected.getMediaItemAt(index).mediaId.toLongOrNull()
             }
         }
 

@@ -75,6 +75,8 @@ class MusicViewModel @Inject constructor(
     private val selectionMode = MutableStateFlow(false)
     private val selectedIds = MutableStateFlow<Set<Long>>(emptySet())
     private val loading = MutableStateFlow(true)
+    // StateIn emits its initial emptyList() before MediaStore returns a real result.
+    // Keep this flag so that this placeholder can never clear the playback service queue.
     private val hasLoadedTrackSnapshot = MutableStateFlow(false)
     private val effectsInternal = MutableSharedFlow<MusicEffect>(extraBufferCapacity = 16)
     private var playbackConnectionJob: Job? = null
@@ -178,6 +180,11 @@ class MusicViewModel @Inject constructor(
             }
         }
     }
+
+    /**
+     * Reconnect the UI controller when the Activity returns to foreground.
+     * This does not recreate the player or reload the music library.
+     */
     fun ensurePlaybackConnected() {
         if (playbackConnectionJob?.isActive == true) return
         playbackConnectionJob = viewModelScope.launch {
@@ -191,6 +198,8 @@ class MusicViewModel @Inject constructor(
     fun refresh() {
         if (deleteJob?.isActive == true) return
         viewModelScope.launch {
+            // Keep the current list visible while refreshing. Show the initial spinner only
+            // when no usable snapshot has been loaded yet.
             if (allTracks.value.isEmpty()) loading.value = true
             runCatching { refreshAudioTracks() }
                 .onFailure {
