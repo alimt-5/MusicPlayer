@@ -3,6 +3,7 @@ package com.example.musicplayer.musicFeature.presentation.viewmodel
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.musicplayer.musicFeature.core.platform.storage.PartialDeleteException
 import com.example.musicplayer.musicFeature.core.platform.storage.RecoverableDeleteException
 import com.example.musicplayer.musicFeature.core.platform.storage.RecoverableRenameException
 import com.example.musicplayer.musicFeature.domain.model.AudioTrack
@@ -33,6 +34,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -44,6 +46,7 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.retryWhen
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -75,22 +78,38 @@ class MusicViewModel @Inject constructor(
     private val selectionMode = MutableStateFlow(false)
     private val selectedIds = MutableStateFlow<Set<Long>>(emptySet())
     private val loading = MutableStateFlow(true)
-    // StateIn emits its initial emptyList() before MediaStore returns a real result.
-    // Keep this flag so that this placeholder can never clear the playback service queue.
-    private val hasLoadedTrackSnapshot = MutableStateFlow(false)
+    private val hasReceivedLibrarySnapshot = MutableStateFlow(false)
     private val effectsInternal = MutableSharedFlow<MusicEffect>(extraBufferCapacity = 16)
-    private var playbackConnectionJob: Job? = null
 
     val effects = effectsInternal.asSharedFlow()
 
     private val allTracks: StateFlow<List<AudioTrack>> = getAudioTracks()
+        .retryWhen { error, attempt ->
+            if (error is CancellationException || attempt >= 2) {
+                false
+            } else {
+                Log.w("MusicLibrary", "Library stream failed; retrying (${attempt + 1}/2)", error)
+                delay((500L * (attempt + 1L)).milliseconds)
+                true
+            }
+        }
         .catch { error ->
+            // Do not emit emptyList() here. A transient MediaStore/provider failure is not
+            // an empty music library; emitting an empty list could also prune the playback queue.
+            Log.e("MusicLibrary", "Could not read the music library", error)
             loading.value = false
-            effectsInternal.emit(MusicEffect.ShowMessage("Could not read the music library"))
-            emit(emptyList())
+            val detail = error.message
+                ?.takeIf(String::isNotBlank)
+                ?.take(110)
+            val message = if (detail == null) {
+                "Could not read the music library"
+            } else {
+                "Could not read music library: $detail"
+            }
+            effectsInternal.emit(MusicEffect.ShowMessage(message))
         }
         .onEach {
-            hasLoadedTrackSnapshot.value = true
+            hasReceivedLibrarySnapshot.value = true
             loading.value = false
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
@@ -159,7 +178,11 @@ class MusicViewModel @Inject constructor(
 
     private var pendingDeleteTracks: List<AudioTrack> = emptyList()
     private var retryAfterDeleteApproval = false
+    private var pendingApprovedTrackIds: Set<Long> = emptySet()
+    private var pendingRejectedTrackIds: Set<Long> = emptySet()
+    private val pendingDeleteFailedTitles = LinkedHashSet<String>()
     private var deleteJob: Job? = null
+    private var playbackConnectionJob: Job? = null
     private data class PendingRename(val track: AudioTrack, val newName: String)
     private var pendingRename: PendingRename? = null
 
@@ -167,9 +190,7 @@ class MusicViewModel @Inject constructor(
         ensurePlaybackConnected()
         viewModelScope.launch {
             allTracks.collect { tracks ->
-                // Do not prune a live MediaSession queue using StateFlow's temporary initial [].
-                if (!hasLoadedTrackSnapshot.value) return@collect
-
+                if (!hasReceivedLibrarySnapshot.value) return@collect
                 val availableIds = tracks.mapTo(HashSet(tracks.size), AudioTrack::id)
                 val currentTrackId = playbackState.value.currentTrackId
                 if (currentTrackId != null && currentTrackId !in availableIds) {
@@ -181,9 +202,9 @@ class MusicViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Reconnect the UI controller when the Activity returns to foreground.
-     * This does not recreate the player or reload the music library.
+    /** Reconnects the UI controller when the app returns to the foreground.
+     * Media3 keeps playback in PlaybackService; this only reconnects the controller
+     * and does not rebuild the playlist or restart the current track.
      */
     fun ensurePlaybackConnected() {
         if (playbackConnectionJob?.isActive == true) return
@@ -198,12 +219,10 @@ class MusicViewModel @Inject constructor(
     fun refresh() {
         if (deleteJob?.isActive == true) return
         viewModelScope.launch {
-            // Keep the current list visible while refreshing. Show the initial spinner only
-            // when no usable snapshot has been loaded yet.
-            if (allTracks.value.isEmpty()) loading.value = true
+            if (allTracks.value.isEmpty() && !hasReceivedLibrarySnapshot.value) loading.value = true
             runCatching { refreshAudioTracks() }
                 .onFailure {
-                    loading.value = false
+                    if (!hasReceivedLibrarySnapshot.value) loading.value = false
                     effectsInternal.emit(MusicEffect.ShowMessage("Could not refresh music library"))
                 }
         }
@@ -310,8 +329,11 @@ class MusicViewModel @Inject constructor(
         if (tracks.isEmpty() || pendingDeleteTracks.isNotEmpty()) return
         deleteJob?.cancel()
         deleteJob = null
-        pendingDeleteTracks = tracks.distinctBy(AudioTrack::id)
+        pendingDeleteTracks = tracks.distinctBy(AudioTrack::mediaUri)
         retryAfterDeleteApproval = false
+        pendingApprovedTrackIds = emptySet()
+        pendingRejectedTrackIds = emptySet()
+        pendingDeleteFailedTitles.clear()
         deleteNextBatch()
     }
 
@@ -333,13 +355,33 @@ class MusicViewModel @Inject constructor(
                 deleteJob = null
                 pendingDeleteTracks = pendingDeleteTracks.filterNot { it.id in e.completedTrackIds }
                 retryAfterDeleteApproval = e.retryAfterApproval
+                pendingApprovedTrackIds = e.requestedTrackIds
+                pendingRejectedTrackIds = e.rejectedTrackIds
+                pendingDeleteFailedTitles += e.failedTrackTitles
                 effectsInternal.emit(MusicEffect.LaunchDeleteConfirmation(e.request))
+            } catch (e: PartialDeleteException) {
+                deleteJob = null
+                pendingDeleteTracks = emptyList()
+                retryAfterDeleteApproval = false
+                pendingApprovedTrackIds = emptySet()
+                pendingRejectedTrackIds = emptySet()
+                pendingDeleteFailedTitles.clear()
+                clearSelection()
+                effectsInternal.emit(
+                    MusicEffect.ShowMessage("Deleted ${e.completedTrackIds.size}; could not delete ${e.failedTrackTitles.size}")
+                )
+                refreshAudioTracksInBackground()
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
                 deleteJob = null
-                effectsInternal.emit(MusicEffect.ShowMessage("Could not delete all selected songs"))
+                effectsInternal.emit(MusicEffect.ShowMessage(t.message ?: "Could not delete selected songs"))
                 pendingDeleteTracks = emptyList()
                 retryAfterDeleteApproval = false
+                pendingApprovedTrackIds = emptySet()
+                pendingRejectedTrackIds = emptySet()
+                pendingDeleteFailedTitles.clear()
+                clearSelection()
+                refreshAudioTracksInBackground()
             }
         }
     }
@@ -348,25 +390,51 @@ class MusicViewModel @Inject constructor(
         if (!approved) {
             pendingDeleteTracks = emptyList()
             retryAfterDeleteApproval = false
+            pendingApprovedTrackIds = emptySet()
+            pendingRejectedTrackIds = emptySet()
+            pendingDeleteFailedTitles.clear()
+            clearSelection()
+            refreshAudioTracksInBackground()
             return
         }
 
         if (retryAfterDeleteApproval) {
+            // Android 10 grants permission for the specific item that raised the
+            // RecoverableSecurityException. Retry the remaining list; more protected
+            // files may require another system confirmation.
             retryAfterDeleteApproval = false
             deleteNextBatch()
             return
         }
 
-        val deletedBatchSize = minOf(2_000, pendingDeleteTracks.size)
-        pendingDeleteTracks = pendingDeleteTracks.drop(deletedBatchSize)
+        // Android 11+ performs the requested delete before returning RESULT_OK.
+        // Remove exactly the IDs sent to createDeleteRequest(), not an assumed prefix.
+        val handledIds = pendingApprovedTrackIds + pendingRejectedTrackIds
+        if (handledIds.isNotEmpty()) {
+            pendingDeleteTracks = pendingDeleteTracks.filterNot { it.id in handledIds }
+        } else {
+            val approvedBatchSize = minOf(2_000, pendingDeleteTracks.size)
+            pendingDeleteTracks = pendingDeleteTracks.drop(approvedBatchSize)
+        }
+        pendingApprovedTrackIds = emptySet()
+        pendingRejectedTrackIds = emptySet()
         deleteNextBatch()
     }
 
     private fun finishDelete() {
         pendingDeleteTracks = emptyList()
         retryAfterDeleteApproval = false
+        pendingApprovedTrackIds = emptySet()
+        pendingRejectedTrackIds = emptySet()
         clearSelection()
-        effectsInternal.tryEmit(MusicEffect.NavigateBackAfterDelete)
+        if (pendingDeleteFailedTitles.isNotEmpty()) {
+            effectsInternal.tryEmit(
+                MusicEffect.ShowMessage("Could not delete ${pendingDeleteFailedTitles.size} selected file(s)")
+            )
+            pendingDeleteFailedTitles.clear()
+        } else {
+            effectsInternal.tryEmit(MusicEffect.NavigateBackAfterDelete)
+        }
         refreshAudioTracksInBackground()
     }
 
@@ -401,7 +469,7 @@ class MusicViewModel @Inject constructor(
                 renameAudioTrack(pending.track, pending.newName, afterApproval)
                 if (pendingRename == pending) pendingRename = null
                 effectsInternal.emit(MusicEffect.ShowMessage("Song renamed"))
-                refreshAudioTracks()
+                // MediaStore's ContentObserver (or MediaScanner on Android 9) refreshes the list.
             } catch (error: RecoverableRenameException) {
                 effectsInternal.emit(MusicEffect.LaunchRenameConfirmation(error.request))
             } catch (error: Throwable) {

@@ -15,7 +15,6 @@
         tools:ignore="ScopedStorage" />
     <uses-permission android:name="FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
 
-
     <application
         android:name=".musicFeature.core.MusicPlayerApplication"
         android:allowBackup="true"

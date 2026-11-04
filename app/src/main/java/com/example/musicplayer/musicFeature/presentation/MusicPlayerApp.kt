@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.provider.Settings
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -23,7 +24,7 @@ import androidx.core.net.toUri
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.LifecycleOwner
 import androidx.navigation.compose.rememberNavController
 import com.example.musicplayer.musicFeature.presentation.model.MusicEffect
 import com.example.musicplayer.musicFeature.presentation.navigation.Navigation
@@ -32,10 +33,23 @@ import com.example.musicplayer.musicFeature.presentation.viewmodel.MusicViewMode
 @Composable
 fun MusicPlayerApp(viewModel: MusicViewModel = hiltViewModel()) {
     val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
     val navController = rememberNavController()
     var audioPermissionGranted by rememberSaveable { mutableStateOf(hasAudioPermission(context)) }
     var permissionRequested by rememberSaveable { mutableStateOf(false) }
+    val lifecycleOwner = context as? LifecycleOwner
+
+    // Reconnect the UI controller and re-check runtime permissions when the Activity
+    // returns from Home or system settings. Playback remains owned by MediaSessionService.
+    DisposableEffect(lifecycleOwner, viewModel) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_START) {
+                audioPermissionGranted = hasAudioPermission(context)
+                viewModel.ensurePlaybackConnected()
+            }
+        }
+        lifecycleOwner?.lifecycle?.addObserver(observer)
+        onDispose { lifecycleOwner?.lifecycle?.removeObserver(observer) }
+    }
 
     val permissions = buildList {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -65,20 +79,6 @@ fun MusicPlayerApp(viewModel: MusicViewModel = hiltViewModel()) {
         ActivityResultContracts.StartIntentSenderForResult()
     ) { result ->
         viewModel.onRenameConfirmationResult(result.resultCode == Activity.RESULT_OK)
-    }
-
-    DisposableEffect(lifecycleOwner, audioPermissionGranted) {
-        if (!audioPermissionGranted) {
-            onDispose { }
-        } else {
-            val observer = LifecycleEventObserver { _, event ->
-                if (event == Lifecycle.Event.ON_START) {
-                    viewModel.ensurePlaybackConnected()
-                }
-            }
-            lifecycleOwner.lifecycle.addObserver(observer)
-            onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-        }
     }
 
     LaunchedEffect(audioPermissionGranted) {
@@ -112,24 +112,39 @@ fun MusicPlayerApp(viewModel: MusicViewModel = hiltViewModel()) {
     if (audioPermissionGranted) {
         Navigation(navController, viewModel)
     } else {
-        PermissionScreen {
-            permissionLauncher.launch(permissions.toTypedArray())
-        }
+        PermissionScreen(
+            needsLegacyWritePermission = Build.VERSION.SDK_INT <= Build.VERSION_CODES.P,
+            onRequestPermission = { permissionLauncher.launch(permissions.toTypedArray()) },
+            onOpenSettings = {
+                val settingsIntent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = Uri.fromParts("package", context.packageName, null)
+                }
+                context.startActivity(settingsIntent)
+            }
+        )
     }
 }
 
-private fun hasAudioPermission(context: Context): Boolean =
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.READ_MEDIA_AUDIO
-        ) == PackageManager.PERMISSION_GRANTED
+private fun hasAudioPermission(context: Context): Boolean {
+    val readPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        Manifest.permission.READ_MEDIA_AUDIO
     } else {
+        Manifest.permission.READ_EXTERNAL_STORAGE
+    }
+    val hasReadPermission = ContextCompat.checkSelfPermission(
+        context,
+        readPermission
+    ) == PackageManager.PERMISSION_GRANTED
+
+    // Android 9 and below still use legacy shared-storage writes for rename/delete.
+    val hasLegacyWritePermission = Build.VERSION.SDK_INT > Build.VERSION_CODES.P ||
         ContextCompat.checkSelfPermission(
             context,
-            Manifest.permission.READ_EXTERNAL_STORAGE
+            Manifest.permission.WRITE_EXTERNAL_STORAGE
         ) == PackageManager.PERMISSION_GRANTED
-    }
+
+    return hasReadPermission && hasLegacyWritePermission
+}
 
 private fun shareAudio(context: Context, uris: List<String>) {
     val intent = if (uris.size == 1) {
