@@ -14,6 +14,7 @@ class AudioRepositoryImpl @Inject constructor(
     override fun observeAudioTracks(): Flow<List<AudioTrack>> = dataSource.observeAudioTracks()
     override suspend fun refreshAudioTracks() = dataSource.refresh()
     override suspend fun deleteTracks(tracks: List<AudioTrack>) = dataSource.deleteTracks(tracks)
+    override suspend fun persistStorageTreeAccess(uri: String) = dataSource.persistStorageTreeAccess(uri)
     override suspend fun renameTrack(track: AudioTrack, newName: String, afterApproval: Boolean) =
         dataSource.renameTrack(track, newName, afterApproval)
 }

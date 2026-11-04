@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.musicplayer.musicFeature.core.platform.storage.PartialDeleteException
 import com.example.musicplayer.musicFeature.core.platform.storage.RecoverableDeleteException
 import com.example.musicplayer.musicFeature.core.platform.storage.RecoverableRenameException
+import com.example.musicplayer.musicFeature.core.platform.storage.StorageTreeAccessRequiredException
 import com.example.musicplayer.musicFeature.domain.model.AudioTrack
 import com.example.musicplayer.musicFeature.domain.model.RepeatMode
 import com.example.musicplayer.musicFeature.domain.model.SortType
@@ -34,7 +35,6 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -46,7 +46,6 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
-import kotlinx.coroutines.flow.retryWhen
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -84,29 +83,11 @@ class MusicViewModel @Inject constructor(
     val effects = effectsInternal.asSharedFlow()
 
     private val allTracks: StateFlow<List<AudioTrack>> = getAudioTracks()
-        .retryWhen { error, attempt ->
-            if (error is CancellationException || attempt >= 2) {
-                false
-            } else {
-                Log.w("MusicLibrary", "Library stream failed; retrying (${attempt + 1}/2)", error)
-                delay((500L * (attempt + 1L)).milliseconds)
-                true
-            }
-        }
         .catch { error ->
-            // Do not emit emptyList() here. A transient MediaStore/provider failure is not
-            // an empty music library; emitting an empty list could also prune the playback queue.
             Log.e("MusicLibrary", "Could not read the music library", error)
             loading.value = false
-            val detail = error.message
-                ?.takeIf(String::isNotBlank)
-                ?.take(110)
-            val message = if (detail == null) {
-                "Could not read the music library"
-            } else {
-                "Could not read music library: $detail"
-            }
-            effectsInternal.emit(MusicEffect.ShowMessage(message))
+            effectsInternal.emit(MusicEffect.ShowMessage("Could not read the music library"))
+            emit(emptyList())
         }
         .onEach {
             hasReceivedLibrarySnapshot.value = true
@@ -351,6 +332,9 @@ class MusicViewModel @Inject constructor(
                 pendingDeleteTracks = pendingDeleteTracks.drop(batch.size)
                 deleteJob = null
                 deleteNextBatch()
+            } catch (e: StorageTreeAccessRequiredException) {
+                deleteJob = null
+                effectsInternal.emit(MusicEffect.LaunchStorageTreePicker(e.message ?: "Select the storage folder to continue."))
             } catch (e: RecoverableDeleteException) {
                 deleteJob = null
                 pendingDeleteTracks = pendingDeleteTracks.filterNot { it.id in e.completedTrackIds }
@@ -382,6 +366,30 @@ class MusicViewModel @Inject constructor(
                 pendingDeleteFailedTitles.clear()
                 clearSelection()
                 refreshAudioTracksInBackground()
+            }
+        }
+    }
+
+    fun onStorageTreeAccessResult(uri: String?) {
+        if (uri.isNullOrBlank()) {
+            pendingDeleteTracks = emptyList()
+            pendingRename = null
+            retryAfterDeleteApproval = false
+            pendingApprovedTrackIds = emptySet()
+            pendingRejectedTrackIds = emptySet()
+            clearSelection()
+            effectsInternal.tryEmit(MusicEffect.ShowMessage("Folder access was cancelled. No pending file operation was performed."))
+            return
+        }
+
+        viewModelScope.launch {
+            try {
+                deleteAudioTracks.persistStorageTreeAccess(uri)
+                val rename = pendingRename
+                if (rename != null) performRename(rename, afterApproval = false) else deleteNextBatch()
+            } catch (error: Throwable) {
+                if (error is CancellationException) throw error
+                effectsInternal.emit(MusicEffect.ShowMessage(error.message ?: "Could not save folder access"))
             }
         }
     }
@@ -470,6 +478,8 @@ class MusicViewModel @Inject constructor(
                 if (pendingRename == pending) pendingRename = null
                 effectsInternal.emit(MusicEffect.ShowMessage("Song renamed"))
                 // MediaStore's ContentObserver (or MediaScanner on Android 9) refreshes the list.
+            } catch (error: StorageTreeAccessRequiredException) {
+                effectsInternal.emit(MusicEffect.LaunchStorageTreePicker(error.message ?: "Select the storage folder to continue."))
             } catch (error: RecoverableRenameException) {
                 effectsInternal.emit(MusicEffect.LaunchRenameConfirmation(error.request))
             } catch (error: Throwable) {

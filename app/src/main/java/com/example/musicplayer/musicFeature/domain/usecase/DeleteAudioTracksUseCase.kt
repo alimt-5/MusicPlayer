@@ -8,4 +8,5 @@ class DeleteAudioTracksUseCase @Inject constructor(
     private val repository: AudioRepository
 ) {
     suspend operator fun invoke(tracks: List<AudioTrack>) = repository.deleteTracks(tracks)
+    suspend fun persistStorageTreeAccess(uri: String) = repository.persistStorageTreeAccess(uri)
 }

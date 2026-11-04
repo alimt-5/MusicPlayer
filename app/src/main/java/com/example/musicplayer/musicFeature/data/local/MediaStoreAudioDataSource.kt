@@ -10,9 +10,11 @@ import android.database.ContentObserver
 import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.os.Process
+import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.util.Log
 import androidx.activity.result.IntentSenderRequest
@@ -21,6 +23,7 @@ import androidx.core.net.toUri
 import com.example.musicplayer.musicFeature.core.platform.storage.PartialDeleteException
 import com.example.musicplayer.musicFeature.core.platform.storage.RecoverableDeleteException
 import com.example.musicplayer.musicFeature.core.platform.storage.RecoverableRenameException
+import com.example.musicplayer.musicFeature.core.platform.storage.StorageTreeAccessRequiredException
 import com.example.musicplayer.musicFeature.domain.model.AudioTrack
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
@@ -31,9 +34,9 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.receiveAsFlow
@@ -54,6 +57,7 @@ class MediaStoreAudioDataSource @Inject constructor(
     private val manualRefreshes = Channel<Unit>(Channel.CONFLATED)
     private val renamedTitles = context.getSharedPreferences("music_renamed_titles", Context.MODE_PRIVATE)
     private val playbackPreferences = context.getSharedPreferences("music_playback", Context.MODE_PRIVATE)
+    private val storageAccessPreferences = context.getSharedPreferences("music_storage_access", Context.MODE_PRIVATE)
     private val librarySnapshotFile = File(context.filesDir, "music_library_snapshot.json")
 
     @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
@@ -69,46 +73,56 @@ class MediaStoreAudioDataSource @Inject constructor(
                 resolver.registerContentObserver(audioCollectionUri(), true, observer)
                 registered = true
             } catch (error: Exception) {
-                // Some OEM MediaProviders reject observer registration for the aggregate
-                // external-volume URI. Do not fail the whole library flow: startup and
-                // explicit refresh still perform a direct query.
-                Log.w("MediaStoreAudio", "Could not register MediaStore observer; continuing with direct queries", error)
+                // Observer registration is useful for live updates, but must not prevent
+                // the initial/manual MediaStore query from loading the library.
+                Log.w("MediaStoreAudio", "Could not register MediaStore observer", error)
             }
             awaitClose {
                 if (registered) runCatching { resolver.unregisterContentObserver(observer) }
             }
-        }
+        }.debounce(250.milliseconds)
 
-        // Coalesce the initial signal, the Activity's first refresh(), and MediaStore
-        // notifications into one query instead of cancelling/restarting the first scan.
-        val refreshSignals = merge(
-            flowOf(Unit),
-            changes,
-            manualRefreshes.receiveAsFlow()
-        ).debounce(250.milliseconds)
-
-        // Always perform one initial query. Relying only on the conflated refresh channel
-        // can miss the first refresh if it is sent before upstream collection starts.
-        // A cached snapshot is emitted first, then MediaStore replaces it with fresh rows.
-        return flow {
+        // Emit the last successful snapshot immediately, then query MediaStore in the
+        // background and replace the cached list with fresh data. This avoids showing a
+        // full-screen loading state on every app relaunch when the library is already known.
+        // channelFlow is intentional: collectLatest runs its action in a child coroutine.
+        // A regular flow { } builder cannot safely call emit() from that child coroutine.
+        // send() on channelFlow is thread-safe and preserves latest-refresh cancellation.
+        return channelFlow {
             var cacheWasRead = false
-            refreshSignals.collect {
-                if (!hasAudioReadPermission()) return@collect
+            merge(changes, manualRefreshes.receiveAsFlow()).collectLatest {
+                if (!hasAudioReadPermission()) return@collectLatest
 
                 if (!cacheWasRead) {
                     cacheWasRead = true
-                    readCachedTracks()?.let { cached -> emit(cached) }
+                    readCachedTracks()?.let { cached -> send(cached) }
                 }
 
                 val freshTracks = queryAudioTracks()
-                writeCachedTracks(freshTracks)
-                emit(freshTracks)
+                if (freshTracks != null) {
+                    writeCachedTracks(freshTracks)
+                    send(freshTracks)
+                }
             }
         }.flowOn(Dispatchers.IO)
     }
 
     fun refresh() {
         manualRefreshes.trySend(Unit)
+    }
+
+    suspend fun persistStorageTreeAccess(uriString: String) = withContext(Dispatchers.IO) {
+        val treeUri = Uri.parse(uriString)
+        val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        resolver.takePersistableUriPermission(treeUri, flags)
+        val persistedWriteGrant = resolver.persistedUriPermissions.any {
+            it.uri == treeUri && it.isWritePermission
+        }
+        require(persistedWriteGrant) { "The selected folder did not grant write access. Select Internal storage and try again." }
+        val saved = storageAccessPreferences.getStringSet(STORAGE_TREE_URIS_KEY, emptySet())
+            .orEmpty().toMutableSet()
+        saved += treeUri.toString()
+        storageAccessPreferences.edit().putStringSet(STORAGE_TREE_URIS_KEY, saved).apply()
     }
 
     suspend fun deleteTracks(tracks: List<AudioTrack>) = withContext(Dispatchers.IO) {
@@ -133,7 +147,15 @@ class MediaStoreAudioDataSource @Inject constructor(
         val newDisplayName = buildDisplayName(requestedName, oldDisplayName)
         if (newDisplayName.equals(oldDisplayName, ignoreCase = true)) return@withContext
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        if (Build.VERSION.SDK_INT == Build.VERSION_CODES.Q) {
+            val documentUri = findSafDocumentUri(track)
+                ?: throw StorageTreeAccessRequiredException(
+                    "To rename without repeated confirmations on Android 10, select the storage root (Internal storage) in the next screen."
+                )
+            val renamedDocument = DocumentsContract.renameDocument(resolver, documentUri, newDisplayName)
+                ?: throw IllegalStateException("Android could not rename this file. Check that the selected folder is writable.")
+            refresh()
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val updated = try {
                 updateMediaStoreName(uri, newDisplayName)
             } catch (error: android.app.RecoverableSecurityException) {
@@ -325,31 +347,33 @@ class MediaStoreAudioDataSource @Inject constructor(
 
     @RequiresApi(Build.VERSION_CODES.Q)
     private fun deleteOnQ(tracks: List<AudioTrack>) {
+        // Android 10 has no MediaStore batch-delete request. RecoverableSecurityException
+        // is issued per item, so use a persisted SAF tree grant instead. The user grants
+        // access once to the Internal storage root (or a parent folder containing all
+        // selected tracks), after which DocumentsContract can delete the selected files.
+        val documents = tracks.map { track -> track to findSafDocumentUri(track) }
+        val firstUncovered = documents.firstOrNull { it.second == null }?.first
+        if (firstUncovered != null) {
+            throw StorageTreeAccessRequiredException(
+                "To delete multiple songs on Android 10 with one permission, select the Internal storage root in the next screen. It must contain: ${firstUncovered.filePath ?: firstUncovered.title}"
+            )
+        }
+
         val completedIds = LinkedHashSet<Long>()
         val failed = ArrayList<AudioTrack>()
-
-        for (track in tracks) {
-            val uri = track.mediaUri.toUri()
-            if (!isMediaStoreItemUri(uri)) {
-                failed += track
-                continue
-            }
+        for ((track, documentUri) in documents) {
             try {
-                val deletedRows = resolver.delete(uri, null, null)
-                when {
-                    deletedRows > 0 -> completedIds += track.id
-                    mediaRowState(uri) == MediaRowState.MISSING -> completedIds += track.id
-                    else -> failed += track
+                val deleted = DocumentsContract.deleteDocument(resolver, requireNotNull(documentUri))
+                if (deleted) {
+                    completedIds += track.id
+                } else {
+                    // A stale MediaStore row can outlive a file that was already removed.
+                    val mediaUri = track.mediaUri.toUri()
+                    if (mediaRowState(mediaUri) == MediaRowState.MISSING) completedIds += track.id
+                    else failed += track
                 }
-            } catch (error: android.app.RecoverableSecurityException) {
-                val request = IntentSenderRequest.Builder(
-                    error.userAction.actionIntent.intentSender
-                ).build()
-                throw RecoverableDeleteException(
-                    request = request,
-                    retryAfterApproval = true,
-                    completedTrackIds = completedIds
-                )
+            } catch (error: SecurityException) {
+                failed += track
             } catch (error: Exception) {
                 if (error is CancellationException) throw error
                 failed += track
@@ -359,6 +383,54 @@ class MediaStoreAudioDataSource @Inject constructor(
         if (failed.isNotEmpty()) {
             throw PartialDeleteException(completedIds, failed.map(AudioTrack::title))
         }
+    }
+
+    private fun findSafDocumentUri(track: AudioTrack): Uri? {
+        val filePath = track.filePath?.takeIf(String::isNotBlank) ?: queryFilePath(track.mediaUri.toUri())
+        val targetDocumentId = filePath?.let(::documentIdForPath) ?: return null
+        val savedTrees = storageAccessPreferences.getStringSet(STORAGE_TREE_URIS_KEY, emptySet()).orEmpty()
+        val persistedUris = resolver.persistedUriPermissions
+            .filter { it.isWritePermission }
+            .mapTo(HashSet<Uri>()) { it.uri }
+        for (treeString in savedTrees) {
+            val treeUri = Uri.parse(treeString)
+            if (treeUri !in persistedUris) continue
+            val rawRootId = runCatching { DocumentsContract.getTreeDocumentId(treeUri) }.getOrNull() ?: continue
+            val rootId = if (':' in rawRootId) rawRootId else "$rawRootId:"
+            val prefix = if (rootId.endsWith(":")) rootId else "$rootId/"
+            if (targetDocumentId == rootId || targetDocumentId.startsWith(prefix)) {
+                return runCatching {
+                    DocumentsContract.buildDocumentUriUsingTree(treeUri, targetDocumentId)
+                }.getOrNull()
+            }
+        }
+        return null
+    }
+
+    private fun queryFilePath(mediaUri: Uri): String? = runCatching {
+        resolver.query(mediaUri, arrayOf(MediaStore.Audio.Media.DATA), null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) cursor.getString(0)?.takeIf(String::isNotBlank) else null
+        }
+    }.getOrNull()
+
+    private fun documentIdForPath(path: String): String? {
+        val canonicalPath = runCatching { File(path).canonicalPath }.getOrNull() ?: return null
+        val primaryRoot = runCatching { Environment.getExternalStorageDirectory().canonicalPath }.getOrNull()
+        if (primaryRoot != null && canonicalPath.startsWith(primaryRoot + File.separator)) {
+            val relative = canonicalPath.removePrefix(primaryRoot + File.separator)
+                .replace(File.separatorChar, '/')
+            return "primary:$relative"
+        }
+
+        // Removable external-storage volumes use their volume UUID as the document ID prefix.
+        val storagePrefix = "/storage/"
+        if (canonicalPath.startsWith(storagePrefix)) {
+            val relative = canonicalPath.removePrefix(storagePrefix)
+            val volumeId = relative.substringBefore('/')
+            val volumePath = relative.substringAfter('/', "")
+            if (volumeId.isNotBlank() && volumePath.isNotBlank()) return "$volumeId:$volumePath"
+        }
+        return null
     }
 
     private fun deleteOnPie(tracks: List<AudioTrack>) {
@@ -531,52 +603,24 @@ class MediaStoreAudioDataSource @Inject constructor(
         return context.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
     }
 
-    private fun queryAudioTracks(): List<AudioTrack> {
-        try {
-            return queryAudioTracksInternal(
-                collection = audioCollectionUri(),
-                projection = buildProjection(),
-                selection = buildSelection(),
-                allowPathlessFingerprint = true
-            )
+    private fun queryAudioTracks(): List<AudioTrack>? {
+        return try {
+            queryAudioTracksInternal()
         } catch (error: CancellationException) {
             throw error
         } catch (error: SecurityException) {
-            // Never turn a permission failure into an empty library; the caller keeps its
-            // last cached snapshot and reports the actual cause.
-            Log.e("MediaStoreAudio", "Audio library read permission was denied", error)
-            throw error
-        } catch (primaryError: Exception) {
-            Log.w("MediaStoreAudio", "Primary MediaStore query failed; trying compatibility query", primaryError)
-            try {
-                // Some OEM MediaProvider implementations reject newer optional columns
-                // (VOLUME_NAME, RELATIVE_PATH, DATA) or selection terms such as IS_TRASHED.
-                // Retry with the stable audio columns and no optional selection predicates.
-                return queryAudioTracksInternal(
-                    collection = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
-                    projection = buildFallbackProjection(),
-                    selection = "${MediaStore.Audio.Media.DURATION} > 1000 AND ${MediaStore.Audio.Media.SIZE} > 0",
-                    allowPathlessFingerprint = false
-                )
-            } catch (fallbackError: CancellationException) {
-                throw fallbackError
-            } catch (fallbackError: Exception) {
-                fallbackError.addSuppressed(primaryError)
-                Log.e("MediaStoreAudio", "Both primary and compatibility MediaStore queries failed", fallbackError)
-                throw IllegalStateException(
-                    "Could not query audio files from MediaStore: ${fallbackError.message ?: fallbackError.javaClass.simpleName}",
-                    fallbackError
-                )
-            }
+            // A permission failure is not an empty library. Keep the last valid snapshot and
+            // never let a temporary access issue prune the active playback queue.
+            Log.w("MediaStoreAudio", "Audio library permission is unavailable", error)
+            null
+        } catch (error: Exception) {
+            Log.e("MediaStoreAudio", "Could not query the audio library", error)
+            null
         }
     }
 
-    private fun queryAudioTracksInternal(
-        collection: Uri,
-        projection: Array<String>,
-        selection: String?,
-        allowPathlessFingerprint: Boolean
-    ): List<AudioTrack> {
+    private fun queryAudioTracksInternal(): List<AudioTrack> {
+        val collection = audioCollectionUri()
         val tracks = ArrayList<AudioTrack>()
         // Use real physical paths as the primary duplicate key. Metadata fingerprints are
         // used only when the provider does not expose a path; otherwise two different files
@@ -590,8 +634,8 @@ class MediaStoreAudioDataSource @Inject constructor(
 
         val cursor = resolver.query(
             collection,
-            projection,
-            selection,
+            buildProjection(),
+            buildSelection(),
             null,
             "${MediaStore.Audio.Media._ID} ASC"
         ) ?: throw IllegalStateException("MediaStore returned no cursor while reading the music library")
@@ -672,16 +716,16 @@ class MediaStoreAudioDataSource @Inject constructor(
                     title = rawTitle,
                     artist = artist
                 )
-                val existingIndex = when {
-                    pathIdentity != null -> pathToIndex[pathIdentity]
-                    allowPathlessFingerprint -> pathlessFingerprintToIndex[fallbackIdentity]
-                    else -> null
+                val existingIndex = if (pathIdentity != null) {
+                    pathToIndex[pathIdentity]
+                } else {
+                    pathlessFingerprintToIndex[fallbackIdentity]
                 }
                 if (existingIndex == null) {
                     val newIndex = tracks.size
                     tracks += track
                     if (pathIdentity != null) pathToIndex[pathIdentity] = newIndex
-                    else if (allowPathlessFingerprint) pathlessFingerprintToIndex[fallbackIdentity] = newIndex
+                    else pathlessFingerprintToIndex[fallbackIdentity] = newIndex
                 } else {
                     val existing = tracks[existingIndex]
                     // Validate only duplicate candidates. Do not instantiate MediaExtractor here:
@@ -757,18 +801,6 @@ class MediaStoreAudioDataSource @Inject constructor(
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) add("${MediaStore.Audio.Media.IS_TRASHED} = 0")
     }.joinToString(" AND ")
 
-    private fun buildFallbackProjection(): Array<String> = arrayOf(
-        MediaStore.Audio.Media._ID,
-        MediaStore.Audio.Media.TITLE,
-        MediaStore.Audio.Media.ARTIST,
-        MediaStore.Audio.Media.DURATION,
-        MediaStore.Audio.Media.DATE_ADDED,
-        MediaStore.Audio.Media.ALBUM_ID,
-        MediaStore.Audio.Media.SIZE,
-        MediaStore.Audio.Media.DISPLAY_NAME,
-        MediaStore.Audio.Media.MIME_TYPE
-    )
-
     private fun buildProjection(): Array<String> = buildList {
         add(MediaStore.Audio.Media._ID)
         add(MediaStore.Audio.Media.TITLE)
@@ -788,9 +820,11 @@ class MediaStoreAudioDataSource @Inject constructor(
 
     private fun audioCollectionUri(): Uri =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            runCatching { MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL) }
-                .getOrDefault(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI)
+            MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
         } else {
             MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
         }
+    private companion object {
+        const val STORAGE_TREE_URIS_KEY = "persisted_storage_tree_uris"
+    }
 }

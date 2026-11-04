@@ -4,10 +4,11 @@ import android.Manifest
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
-import android.provider.Settings
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.provider.DocumentsContract
+import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -81,6 +82,12 @@ fun MusicPlayerApp(viewModel: MusicViewModel = hiltViewModel()) {
         viewModel.onRenameConfirmationResult(result.resultCode == Activity.RESULT_OK)
     }
 
+    val storageTreeLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        viewModel.onStorageTreeAccessResult(uri?.toString())
+    }
+
     LaunchedEffect(audioPermissionGranted) {
         if (audioPermissionGranted) {
             viewModel.refresh()
@@ -94,6 +101,16 @@ fun MusicPlayerApp(viewModel: MusicViewModel = hiltViewModel()) {
         viewModel.effects.collect { effect ->
             when (effect) {
                 is MusicEffect.LaunchDeleteConfirmation -> deleteLauncher.launch(effect.request)
+                is MusicEffect.LaunchStorageTreePicker -> {
+                    Toast.makeText(context, effect.message, Toast.LENGTH_LONG).show()
+                    val initialUri = if (Build.VERSION.SDK_INT == Build.VERSION_CODES.Q) {
+                        DocumentsContract.buildDocumentUri(
+                            "com.android.externalstorage.documents",
+                            "primary:"
+                        )
+                    } else null
+                    storageTreeLauncher.launch(initialUri)
+                }
                 is MusicEffect.LaunchRenameConfirmation -> renameLauncher.launch(effect.request)
                 is MusicEffect.ShareAudio -> shareAudio(context, effect.uris)
                 MusicEffect.NavigateBackAfterDelete -> if (navController.previousBackStackEntry != null) {

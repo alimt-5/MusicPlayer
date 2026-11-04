@@ -7,5 +7,6 @@ interface AudioRepository {
     fun observeAudioTracks(): Flow<List<AudioTrack>>
     suspend fun refreshAudioTracks()
     suspend fun deleteTracks(tracks: List<AudioTrack>)
+    suspend fun persistStorageTreeAccess(uri: String)
     suspend fun renameTrack(track: AudioTrack, newName: String, afterApproval: Boolean = false)
 }
