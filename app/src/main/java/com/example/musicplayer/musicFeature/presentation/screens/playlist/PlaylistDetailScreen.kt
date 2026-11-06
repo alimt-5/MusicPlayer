@@ -12,8 +12,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
@@ -44,7 +44,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.musicplayer.musicFeature.domain.model.AudioTrack
-import com.example.musicplayer.musicFeature.domain.model.MusicPlaylist
 import com.example.musicplayer.musicFeature.presentation.screens.list.SongAlbumArt
 import com.example.musicplayer.musicFeature.presentation.viewmodel.MusicViewModel
 import com.example.musicplayer.musicFeature.presentation.viewmodel.PlaylistViewModel
@@ -75,7 +74,7 @@ fun PlaylistDetailScreen(
         topBar = {
             TopAppBar(
                 title = { Text(playlist?.name ?: "Playlist", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, contentDescription = "Back") } },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } },
                 actions = {
                     IconButton(onClick = { musicViewModel.shareTracks(tracks) }) {
                         Icon(Icons.Default.Share, contentDescription = "Share playlist")

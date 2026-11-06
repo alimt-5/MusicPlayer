@@ -12,7 +12,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -38,8 +38,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.musicplayer.musicFeature.domain.model.AudioTrack
 import com.example.musicplayer.musicFeature.presentation.screens.list.SongAlbumArt
-import com.example.musicplayer.musicFeature.presentation.viewmodel.PlaylistViewModel
 import com.example.musicplayer.musicFeature.presentation.viewmodel.MusicViewModel
+import com.example.musicplayer.musicFeature.presentation.viewmodel.PlaylistViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -71,7 +71,7 @@ fun AddTracksToPlaylistScreen(
         topBar = {
             TopAppBar(
                 title = { Text("Add songs${playlist?.let { " · ${it.name}" }.orEmpty()}", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, contentDescription = "Back") } },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } },
                 actions = { TextButton(onClick = onBack) { Text("Done") } }
             )
         }

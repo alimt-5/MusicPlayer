@@ -10,20 +10,21 @@ import android.database.ContentObserver
 import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.os.Process
-import android.provider.MediaStore
 import android.provider.DocumentsContract
-import android.os.Environment
+import android.provider.MediaStore
 import android.util.Log
 import androidx.activity.result.IntentSenderRequest
 import androidx.annotation.RequiresApi
+import androidx.core.content.edit
 import androidx.core.net.toUri
 import com.example.musicplayer.musicFeature.core.platform.storage.PartialDeleteException
 import com.example.musicplayer.musicFeature.core.platform.storage.RecoverableDeleteException
-import com.example.musicplayer.musicFeature.core.platform.storage.StorageTreeAccessRequiredException
 import com.example.musicplayer.musicFeature.core.platform.storage.RecoverableRenameException
+import com.example.musicplayer.musicFeature.core.platform.storage.StorageTreeAccessRequiredException
 import com.example.musicplayer.musicFeature.domain.model.AudioTrack
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
@@ -112,7 +113,7 @@ class MediaStoreAudioDataSource @Inject constructor(
     }
 
     suspend fun persistStorageTreeAccess(uriString: String) = withContext(Dispatchers.IO) {
-        val treeUri = Uri.parse(uriString)
+        val treeUri = uriString.toUri()
         val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
         resolver.takePersistableUriPermission(treeUri, flags)
         val persistedWriteGrant = resolver.persistedUriPermissions.any {
@@ -122,7 +123,7 @@ class MediaStoreAudioDataSource @Inject constructor(
         val saved = storageAccessPreferences.getStringSet(STORAGE_TREE_URIS_KEY, emptySet())
             .orEmpty().toMutableSet()
         saved += treeUri.toString()
-        storageAccessPreferences.edit().putStringSet(STORAGE_TREE_URIS_KEY, saved).apply()
+        storageAccessPreferences.edit { putStringSet(STORAGE_TREE_URIS_KEY, saved) }
     }
 
     suspend fun deleteTracks(tracks: List<AudioTrack>) = withContext(Dispatchers.IO) {

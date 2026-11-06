@@ -13,19 +13,19 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -73,7 +73,7 @@ fun PlaylistListScreen(
                 title = { Text(if (selectionMode) "${selectedIds.size} selected" else "Playlists") },
                 navigationIcon = {
                     IconButton(onClick = { if (selectionMode) selectedIds = emptySet() else onBack() }) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = if (selectionMode) "Clear selection" else "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = if (selectionMode) "Clear selection" else "Back")
                     }
                 },
                 actions = {
@@ -100,7 +100,7 @@ fun PlaylistListScreen(
         floatingActionButton = {
             if (!selectionMode) {
                 FloatingActionButton(onClick = { showCreateDialog = true }) {
-                    Icon(Icons.Default.PlaylistAdd, contentDescription = "Create playlist")
+                    Icon(Icons.AutoMirrored.Filled.PlaylistAdd, contentDescription = "Create playlist")
                 }
             }
         }

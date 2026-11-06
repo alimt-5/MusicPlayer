@@ -1,5 +1,6 @@
 package com.example.musicplayer.musicFeature.presentation.screens.player
 
+import android.annotation.SuppressLint
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -18,12 +19,12 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Share
@@ -67,6 +68,7 @@ import com.example.musicplayer.musicFeature.presentation.viewmodel.MusicViewMode
 import com.example.musicplayer.musicFeature.presentation.viewmodel.PlaylistViewModel
 import java.util.concurrent.TimeUnit
 
+@SuppressLint("UnusedBoxWithConstraintsScope", "ConfigurationScreenWidthHeight")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NowPlayingScreen(viewModel: MusicViewModel, playlistViewModel: PlaylistViewModel, onBack: () -> Unit) {
@@ -100,7 +102,7 @@ fun NowPlayingScreen(viewModel: MusicViewModel, playlistViewModel: PlaylistViewM
                         )
                         DropdownMenuItem(
                             text = { Text("Add to playlist") },
-                            leadingIcon = { Icon(Icons.Default.PlaylistAdd, null) },
+                            leadingIcon = { Icon(Icons.AutoMirrored.Filled.PlaylistAdd, null) },
                             onClick = { menuExpanded = false; showAddToPlaylistDialog = currentTrack != null }
                         )
                         DropdownMenuItem(

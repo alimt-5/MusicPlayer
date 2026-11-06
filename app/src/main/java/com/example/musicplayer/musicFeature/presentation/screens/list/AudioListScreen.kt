@@ -6,10 +6,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DoneAll
-import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -67,7 +67,7 @@ fun AudioListScreen(
                             onClick = { tracksToAdd = state.tracks.filter { it.id in state.selectedIds } },
                             enabled = state.selectedIds.isNotEmpty()
                         ) {
-                            Icon(Icons.Default.PlaylistAdd, contentDescription = "Add selected to playlist")
+                            Icon(Icons.AutoMirrored.Filled.PlaylistAdd, contentDescription = "Add selected to playlist")
                         }
                         IconButton(
                             onClick = viewModel::shareSelected,
@@ -83,7 +83,7 @@ fun AudioListScreen(
                         }
                     } else {
                         IconButton(onClick = onOpenPlaylists) {
-                            Icon(Icons.Default.PlaylistAdd, contentDescription = "Playlists")
+                            Icon(Icons.AutoMirrored.Filled.PlaylistAdd, contentDescription = "Playlists")
                         }
                     }
                 }
