@@ -15,6 +15,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Share
@@ -48,6 +49,7 @@ fun SongItem(
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     onShare: () -> Unit,
+    onAddToPlaylist: () -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit
 ) {
@@ -112,6 +114,11 @@ fun SongItem(
                         text = { Text("Share") },
                         leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) },
                         onClick = { menuExpanded = false; onShare() }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Add to playlist") },
+                        leadingIcon = { Icon(Icons.Default.PlaylistAdd, contentDescription = null) },
+                        onClick = { menuExpanded = false; onAddToPlaylist() }
                     )
                     DropdownMenuItem(
                         text = { Text("Rename") },

@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Share
@@ -61,19 +62,23 @@ import com.example.musicplayer.musicFeature.domain.model.AudioTrack
 import com.example.musicplayer.musicFeature.domain.model.PlaybackPosition
 import com.example.musicplayer.musicFeature.domain.model.RepeatMode
 import com.example.musicplayer.musicFeature.presentation.screens.list.RenameSongDialog
+import com.example.musicplayer.musicFeature.presentation.screens.playlist.AddToPlaylistDialog
 import com.example.musicplayer.musicFeature.presentation.viewmodel.MusicViewModel
+import com.example.musicplayer.musicFeature.presentation.viewmodel.PlaylistViewModel
 import java.util.concurrent.TimeUnit
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun NowPlayingScreen(viewModel: MusicViewModel, onBack: () -> Unit) {
+fun NowPlayingScreen(viewModel: MusicViewModel, playlistViewModel: PlaylistViewModel, onBack: () -> Unit) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val playlistState by playlistViewModel.uiState.collectAsStateWithLifecycle()
     val position by viewModel.playbackPosition.collectAsStateWithLifecycle(initialValue = PlaybackPosition())
     var isDragging by remember { mutableStateOf(false) }
     var dragProgress by remember { mutableFloatStateOf(0f) }
     var menuExpanded by remember { mutableStateOf(false) }
     var showDeleteDialog by rememberSaveable { mutableStateOf(false) }
     var showRenameDialog by rememberSaveable { mutableStateOf(false) }
+    var showAddToPlaylistDialog by rememberSaveable { mutableStateOf(false) }
 
     val currentTrack = state.currentTrack
     val duration = position.durationMs.takeIf { it > 0 } ?: currentTrack?.durationMs ?: 0L
@@ -92,6 +97,11 @@ fun NowPlayingScreen(viewModel: MusicViewModel, onBack: () -> Unit) {
                             text = { Text("Share") },
                             leadingIcon = { Icon(Icons.Default.Share, null) },
                             onClick = { currentTrack?.let(viewModel::shareTrack); menuExpanded = false }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Add to playlist") },
+                            leadingIcon = { Icon(Icons.Default.PlaylistAdd, null) },
+                            onClick = { menuExpanded = false; showAddToPlaylistDialog = currentTrack != null }
                         )
                         DropdownMenuItem(
                             text = { Text("Rename") },
@@ -180,6 +190,21 @@ fun NowPlayingScreen(viewModel: MusicViewModel, onBack: () -> Unit) {
                 }
             }
         }
+    }
+
+    if (showAddToPlaylistDialog && currentTrack != null) {
+        AddToPlaylistDialog(
+            playlists = playlistState.playlists,
+            onDismiss = { showAddToPlaylistDialog = false },
+            onSelectPlaylist = { id ->
+                playlistViewModel.addTracksToPlaylist(id, listOf(currentTrack))
+                showAddToPlaylistDialog = false
+            },
+            onCreatePlaylist = { name ->
+                playlistViewModel.createPlaylist(name, listOf(currentTrack))
+                showAddToPlaylistDialog = false
+            }
+        )
     }
 
     if (showRenameDialog && currentTrack != null) {

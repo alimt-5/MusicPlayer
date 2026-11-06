@@ -2,9 +2,11 @@ package com.example.musicplayer.musicFeature.di
 
 import com.example.musicplayer.musicFeature.data.playback.Media3PlaybackRepository
 import com.example.musicplayer.musicFeature.data.repository.AudioRepositoryImpl
+import com.example.musicplayer.musicFeature.data.repository.PlaylistRepositoryImpl
 import com.example.musicplayer.musicFeature.data.repository.SortPreferencesRepositoryImpl
 import com.example.musicplayer.musicFeature.domain.repository.AudioRepository
 import com.example.musicplayer.musicFeature.domain.repository.PlaybackRepository
+import com.example.musicplayer.musicFeature.domain.repository.PlaylistRepository
 import com.example.musicplayer.musicFeature.domain.repository.SortPreferencesRepository
 import dagger.Binds
 import dagger.Module
@@ -26,4 +28,8 @@ abstract class AppModule {
     @Binds
     @Singleton
     abstract fun bindSortPreferencesRepository(impl: SortPreferencesRepositoryImpl): SortPreferencesRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindPlaylistRepository(impl: PlaylistRepositoryImpl): PlaylistRepository
 }

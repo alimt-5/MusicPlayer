@@ -30,9 +30,13 @@ import androidx.navigation.compose.rememberNavController
 import com.example.musicplayer.musicFeature.presentation.model.MusicEffect
 import com.example.musicplayer.musicFeature.presentation.navigation.Navigation
 import com.example.musicplayer.musicFeature.presentation.viewmodel.MusicViewModel
+import com.example.musicplayer.musicFeature.presentation.viewmodel.PlaylistViewModel
 
 @Composable
-fun MusicPlayerApp(viewModel: MusicViewModel = hiltViewModel()) {
+fun MusicPlayerApp(
+    viewModel: MusicViewModel = hiltViewModel(),
+    playlistViewModel: PlaylistViewModel = hiltViewModel()
+) {
     val context = LocalContext.current
     val navController = rememberNavController()
     var audioPermissionGranted by rememberSaveable { mutableStateOf(hasAudioPermission(context)) }
@@ -97,6 +101,12 @@ fun MusicPlayerApp(viewModel: MusicViewModel = hiltViewModel()) {
         }
     }
 
+    LaunchedEffect(playlistViewModel) {
+        playlistViewModel.messages.collect { message ->
+            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+        }
+    }
+
     LaunchedEffect(Unit) {
         viewModel.effects.collect { effect ->
             when (effect) {
@@ -127,7 +137,7 @@ fun MusicPlayerApp(viewModel: MusicViewModel = hiltViewModel()) {
     }
 
     if (audioPermissionGranted) {
-        Navigation(navController, viewModel)
+        Navigation(navController, viewModel, playlistViewModel)
     } else {
         PermissionScreen(
             needsLegacyWritePermission = Build.VERSION.SDK_INT <= Build.VERSION_CODES.P,

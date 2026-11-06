@@ -3,9 +3,9 @@ package com.example.musicplayer.musicFeature.presentation.viewmodel
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.musicplayer.musicFeature.core.platform.storage.PartialDeleteException
 import com.example.musicplayer.musicFeature.core.platform.storage.RecoverableDeleteException
 import com.example.musicplayer.musicFeature.core.platform.storage.RecoverableRenameException
+import com.example.musicplayer.musicFeature.core.platform.storage.PartialDeleteException
 import com.example.musicplayer.musicFeature.core.platform.storage.StorageTreeAccessRequiredException
 import com.example.musicplayer.musicFeature.domain.model.AudioTrack
 import com.example.musicplayer.musicFeature.domain.model.RepeatMode
@@ -95,6 +95,14 @@ class MusicViewModel @Inject constructor(
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
+    /** Shared library snapshot. Playlist screens use this flow instead of opening a second MediaStore observer. */
+    val libraryTracks: StateFlow<List<AudioTrack>> = allTracks
+
+    fun tracksForMediaUris(uris: List<String>): List<AudioTrack> {
+        val byUri = allTracks.value.associateBy(AudioTrack::mediaUri)
+        return uris.distinct().mapNotNull(byUri::get)
+    }
+
     private val trackById: StateFlow<Map<Long, AudioTrack>> = allTracks
         .map { tracks -> tracks.associateBy(AudioTrack::id) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
@@ -162,6 +170,7 @@ class MusicViewModel @Inject constructor(
     private var pendingApprovedTrackIds: Set<Long> = emptySet()
     private var pendingRejectedTrackIds: Set<Long> = emptySet()
     private val pendingDeleteFailedTitles = LinkedHashSet<String>()
+    private var navigateBackAfterDelete = true
     private var deleteJob: Job? = null
     private var playbackConnectionJob: Job? = null
     private data class PendingRename(val track: AudioTrack, val newName: String)
@@ -306,8 +315,9 @@ class MusicViewModel @Inject constructor(
         requestDelete(tracks)
     }
 
-    private fun requestDelete(tracks: List<AudioTrack>) {
+    private fun requestDelete(tracks: List<AudioTrack>, navigateBackOnFinish: Boolean = true) {
         if (tracks.isEmpty() || pendingDeleteTracks.isNotEmpty()) return
+        navigateBackAfterDelete = navigateBackOnFinish
         deleteJob?.cancel()
         deleteJob = null
         pendingDeleteTracks = tracks.distinctBy(AudioTrack::mediaUri)
@@ -350,6 +360,7 @@ class MusicViewModel @Inject constructor(
                 pendingApprovedTrackIds = emptySet()
                 pendingRejectedTrackIds = emptySet()
                 pendingDeleteFailedTitles.clear()
+                navigateBackAfterDelete = true
                 clearSelection()
                 effectsInternal.emit(
                     MusicEffect.ShowMessage("Deleted ${e.completedTrackIds.size}; could not delete ${e.failedTrackTitles.size}")
@@ -364,6 +375,7 @@ class MusicViewModel @Inject constructor(
                 pendingApprovedTrackIds = emptySet()
                 pendingRejectedTrackIds = emptySet()
                 pendingDeleteFailedTitles.clear()
+                navigateBackAfterDelete = true
                 clearSelection()
                 refreshAudioTracksInBackground()
             }
@@ -377,6 +389,7 @@ class MusicViewModel @Inject constructor(
             retryAfterDeleteApproval = false
             pendingApprovedTrackIds = emptySet()
             pendingRejectedTrackIds = emptySet()
+            navigateBackAfterDelete = true
             clearSelection()
             effectsInternal.tryEmit(MusicEffect.ShowMessage("Folder access was cancelled. No pending file operation was performed."))
             return
@@ -401,6 +414,7 @@ class MusicViewModel @Inject constructor(
             pendingApprovedTrackIds = emptySet()
             pendingRejectedTrackIds = emptySet()
             pendingDeleteFailedTitles.clear()
+            navigateBackAfterDelete = true
             clearSelection()
             refreshAudioTracksInBackground()
             return
@@ -435,13 +449,17 @@ class MusicViewModel @Inject constructor(
         pendingApprovedTrackIds = emptySet()
         pendingRejectedTrackIds = emptySet()
         clearSelection()
+        val shouldNavigateBack = navigateBackAfterDelete
+        navigateBackAfterDelete = true
         if (pendingDeleteFailedTitles.isNotEmpty()) {
             effectsInternal.tryEmit(
                 MusicEffect.ShowMessage("Could not delete ${pendingDeleteFailedTitles.size} selected file(s)")
             )
             pendingDeleteFailedTitles.clear()
-        } else {
+        } else if (shouldNavigateBack) {
             effectsInternal.tryEmit(MusicEffect.NavigateBackAfterDelete)
+        } else {
+            effectsInternal.tryEmit(MusicEffect.ShowMessage("Audio files deleted"))
         }
         refreshAudioTracksInBackground()
     }
@@ -491,7 +509,29 @@ class MusicViewModel @Inject constructor(
     }
 
     fun shareTrack(track: AudioTrack) {
-        effectsInternal.tryEmit(MusicEffect.ShareAudio(listOf(track.mediaUri)))
+        shareTracks(listOf(track))
+    }
+
+    fun shareTracks(tracks: List<AudioTrack>) {
+        val uris = tracks.map(AudioTrack::mediaUri).distinct()
+        if (uris.isNotEmpty()) effectsInternal.tryEmit(MusicEffect.ShareAudio(uris))
+    }
+
+    /** Starts playback using the exact ordering of a playlist, without applying the library search/sort state. */
+    fun playTrackCollection(tracks: List<AudioTrack>, startIndex: Int) {
+        if (tracks.isEmpty() || startIndex !in tracks.indices) return
+        viewModelScope.launch {
+            runCatching { playTracks(tracks, startIndex) }
+                .onFailure { error ->
+                    Log.e("MusicPlayback", "Could not play playlist queue", error)
+                    effectsInternal.emit(MusicEffect.ShowMessage("This playlist could not be played"))
+                }
+        }
+    }
+
+    /** Reuses the existing MediaStore/SAF delete flow for tracks selected from a playlist. */
+    fun deleteTracksFromPlaylist(tracks: List<AudioTrack>) {
+        requestDelete(tracks, navigateBackOnFinish = false)
     }
 
     fun shareSelected() {

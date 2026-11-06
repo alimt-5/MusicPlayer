@@ -25,6 +25,7 @@ fun SongsList(
     state: HomeUiState,
     viewModel: MusicViewModel,
     onOpenPlayer: () -> Unit,
+    onAddToPlaylist: (AudioTrack) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val listState = rememberLazyListState()
@@ -61,6 +62,7 @@ fun SongsList(
                             },
                             onLongClick = { viewModel.enterSelectionMode(track.id) },
                             onShare = { viewModel.shareTrack(track) },
+                            onAddToPlaylist = { onAddToPlaylist(track) },
                             onRename = { trackToRename = track },
                             onDelete = { trackToDelete = track }
                         )

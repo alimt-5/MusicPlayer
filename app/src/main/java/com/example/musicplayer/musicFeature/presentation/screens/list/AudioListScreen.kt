@@ -9,6 +9,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -28,30 +29,45 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.musicplayer.musicFeature.domain.model.AudioTrack
+import com.example.musicplayer.musicFeature.presentation.screens.playlist.AddToPlaylistDialog
 import com.example.musicplayer.musicFeature.presentation.viewmodel.MusicViewModel
+import com.example.musicplayer.musicFeature.presentation.viewmodel.PlaylistViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AudioListScreen(
     viewModel: MusicViewModel,
-    onOpenPlayer: () -> Unit
+    playlistViewModel: PlaylistViewModel,
+    onOpenPlayer: () -> Unit,
+    onOpenPlaylists: () -> Unit
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val playlistState by playlistViewModel.uiState.collectAsStateWithLifecycle()
     var showDeleteDialog by remember { mutableStateOf(false) }
+    var tracksToAdd by remember { mutableStateOf<List<AudioTrack>?>(null) }
 
     Scaffold(
         topBar = {
-            if (state.isSelectionMode) {
-                TopAppBar(
-                    title = { Text("${state.selectedIds.size} selected") },
-                    navigationIcon = {
+            TopAppBar(
+                title = { Text(if (state.isSelectionMode) "${state.selectedIds.size} selected" else "Music") },
+                navigationIcon = {
+                    if (state.isSelectionMode) {
                         IconButton(onClick = viewModel::clearSelection) {
-                            Icon(Icons.Default.Close, contentDescription = "Cancel")
+                            Icon(Icons.Default.Close, contentDescription = "Cancel selection")
                         }
-                    },
-                    actions = {
+                    }
+                },
+                actions = {
+                    if (state.isSelectionMode) {
                         IconButton(onClick = viewModel::selectAllVisible) {
                             Icon(Icons.Default.DoneAll, contentDescription = "Select all")
+                        }
+                        IconButton(
+                            onClick = { tracksToAdd = state.tracks.filter { it.id in state.selectedIds } },
+                            enabled = state.selectedIds.isNotEmpty()
+                        ) {
+                            Icon(Icons.Default.PlaylistAdd, contentDescription = "Add selected to playlist")
                         }
                         IconButton(
                             onClick = viewModel::shareSelected,
@@ -65,9 +81,13 @@ fun AudioListScreen(
                         ) {
                             Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error)
                         }
+                    } else {
+                        IconButton(onClick = onOpenPlaylists) {
+                            Icon(Icons.Default.PlaylistAdd, contentDescription = "Playlists")
+                        }
                     }
-                )
-            }
+                }
+            )
         },
         bottomBar = {
             if (state.currentTrack != null) {
@@ -88,16 +108,13 @@ fun AudioListScreen(
                 .background(MaterialTheme.colorScheme.background)
                 .padding(padding)
         ) {
-            if (!state.isSelectionMode) {
-                SearchBar(state, viewModel)
-            }
+            if (!state.isSelectionMode) SearchBar(state, viewModel)
             SongsList(
                 state = state,
                 viewModel = viewModel,
                 onOpenPlayer = onOpenPlayer,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
+                onAddToPlaylist = { tracksToAdd = listOf(it) },
+                modifier = Modifier.fillMaxWidth().weight(1f)
             )
         }
     }
@@ -117,6 +134,23 @@ fun AudioListScreen(
                 ) { Text("Delete") }
             },
             dismissButton = { TextButton(onClick = { showDeleteDialog = false }) { Text("Cancel") } }
+        )
+    }
+
+    tracksToAdd?.let { targetTracks ->
+        AddToPlaylistDialog(
+            playlists = playlistState.playlists,
+            onDismiss = { tracksToAdd = null },
+            onSelectPlaylist = { playlistId ->
+                playlistViewModel.addTracksToPlaylist(playlistId, targetTracks)
+                tracksToAdd = null
+                if (state.isSelectionMode) viewModel.clearSelection()
+            },
+            onCreatePlaylist = { name ->
+                playlistViewModel.createPlaylist(name, targetTracks)
+                tracksToAdd = null
+                if (state.isSelectionMode) viewModel.clearSelection()
+            }
         )
     }
 }
